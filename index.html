@@ -151,6 +151,24 @@
   }
   #scoreHelp .next b { color: #ffe27a; }
 
+  #boardTabs {
+    display: flex; gap: 4px; margin-bottom: 10px;
+    pointer-events: auto;
+  }
+  #boardTabs button {
+    flex: 1; padding: 5px 2px; border-radius: 8px; cursor: pointer;
+    border: none; background: rgba(238,241,248,.07);
+    color: rgba(238,241,248,.45);
+    font-family: inherit; font-size: 10px; font-weight: 700; letter-spacing: .06em;
+  }
+  #boardTabs button.on { background: rgba(238,241,248,.16); }
+  #boardTabs button:active { transform: scale(.95); }
+
+  #board li.empty {
+    display: block; text-align: center;
+    color: rgba(238,241,248,.4); padding: 10px 0;
+  }
+
   #diffPick {
     display: none; flex-wrap: wrap; gap: 8px; justify-content: center;
     pointer-events: auto; max-width: 330px;
@@ -169,7 +187,6 @@
   #diffPick button.on { border-color: currentColor; background: rgba(238,241,248,.1); }
   #diffPick button:active { transform: scale(.97); }
 
-  #board li .dg { font-size: 10px; font-weight: 700; letter-spacing: .08em; opacity: .75; }
 
   @media (prefers-reduced-motion: reduce) {
     #score.pop { transform: none; }
@@ -206,6 +223,7 @@
     </div>
     <div id="board" style="display:none">
       <h2>TOP 5</h2>
+      <div id="boardTabs"></div>
       <ol id="boardList"></ol>
     </div>
   </div>
@@ -232,6 +250,7 @@
   const diffBadge = document.getElementById('diffBadge');
   const diffPick = document.getElementById('diffPick');
   const nextPtsEl = document.getElementById('nextPts');
+  const boardTabs = document.getElementById('boardTabs');
 
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -249,21 +268,25 @@
   // base/gain/cap = 블록 속도(층마다 gain씩 빨라지고 cap까지), tol = PERFECT 판정 px,
   // recover = PERFECT 시 블록 폭 회복 px. SKYLINE 이 기존 기본값이다.
   const DIFFS = [
-    { key: 'foundation', name: 'FOUNDATION', ko: '토대',       base: 2.6, gain: 0.09, cap: 3.0, tol: 10, recover: 6, color: '#7ee0a8' },
-    { key: 'skyline',    name: 'SKYLINE',    ko: '스카이라인', base: 3.2, gain: 0.12, cap: 4.2, tol: 7,  recover: 4, color: '#7ac7ff' },
-    { key: 'vertigo',    name: 'VERTIGO',    ko: '현기증',     base: 4.0, gain: 0.16, cap: 5.4, tol: 5,  recover: 2, color: '#ffb066' },
-    { key: 'babel',      name: 'BABEL',      ko: '바벨',       base: 5.0, gain: 0.20, cap: 6.8, tol: 3,  recover: 0, color: '#ff7a8a' },
+    { key: 'seed',   name: 'SEED',   ko: '씨앗', base: 2.6, gain: 0.09, cap: 3.0, tol: 10, recover: 6, color: '#c2a878' },
+    { key: 'sprout', name: 'SPROUT', ko: '새싹', base: 3.2, gain: 0.12, cap: 4.2, tol: 7,  recover: 4, color: '#7ee0a8' },
+    { key: 'bloom',  name: 'BLOOM',  ko: '개화', base: 4.0, gain: 0.16, cap: 5.4, tol: 5,  recover: 2, color: '#ff8ec7' },
+    { key: 'crown',  name: 'CROWN',  ko: '왕관', base: 5.0, gain: 0.20, cap: 6.8, tol: 3,  recover: 0, color: '#ffd166' },
   ];
+  // 예전 이름으로 저장된 기록을 새 이름으로 옮긴다.
+  const LEGACY = { foundation: 'seed', skyline: 'sprout', vertigo: 'bloom', babel: 'crown' };
   let diffIdx = 1;
   const D = () => DIFFS[diffIdx];
-  const diffByKey = k => DIFFS.find(d => d.key === k) || null;
 
   // ============ 저장소 (리더보드) ============
-  const BOARD_KEY = 'stacker-leaderboard';
+  const BOARD_KEY = 'stacker-leaderboard';   // 예전 단일 보드 (읽기 전용, 이관용)
+  const BOARDS_KEY = 'stacker-boards';       // 단계별 보드
   const NAME_KEY = 'stacker-lastname';
   const DIFF_KEY = 'stacker-difficulty';
   let memName = '';
-  let leaderboard = [];
+  let boards = {};                 // { seed: [...], sprout: [...], ... }
+  let viewKey = null;              // 리더보드에서 보고 있는 단계
+  const boardOf = k => (boards[k] || (boards[k] = []));
 
   // 저장 어댑터: 아티팩트(window.storage) → localStorage(일반 브라우저) → 메모리 순 폴백
   const store = {
@@ -282,10 +305,14 @@
   };
 
   async function loadBoard() {
+    boards = {};
+    DIFFS.forEach(d => boards[d.key] = []);
     try {
-      const b = await store.get(BOARD_KEY);
-      leaderboard = b ? JSON.parse(b) : [];
-    } catch (e) { leaderboard = []; }
+      const raw = await store.get(BOARDS_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (parsed) DIFFS.forEach(d => { if (Array.isArray(parsed[d.key])) boards[d.key] = parsed[d.key]; });
+      else await migrateOldBoard();
+    } catch (e) { /* 손상된 데이터는 빈 보드로 시작 */ }
     const n = await store.get(NAME_KEY);
     if (n) memName = n;
     const d = await store.get(DIFF_KEY);
@@ -296,46 +323,80 @@
     renderBoard();
   }
 
+  // 단계 구분이 없던 시절의 기록을 옮긴다. 그때 기본 설정이 지금의 SPROUT 이므로
+  // 단계 표시가 없는 기록은 SPROUT 로 본다. 예전 키(foundation 등)는 이름만 바뀐 것이다.
+  async function migrateOldBoard() {
+    let old;
+    try { old = JSON.parse(await store.get(BOARD_KEY)); } catch (e) { return; }
+    if (!Array.isArray(old)) return;
+    for (const e of old) {
+      const k = LEGACY[e.diff] || (boards[e.diff] ? e.diff : 'sprout');
+      boardOf(k).push({ id: e.id, name: e.name, score: e.score });
+    }
+    DIFFS.forEach(d => trim(d.key));
+    await store.set(BOARDS_KEY, JSON.stringify(boards));
+  }
+
+  function trim(k) {
+    boards[k] = boardOf(k).sort((a, b) => b.score - a.score).slice(0, 5);
+  }
+
   async function saveBoard() {
-    leaderboard.sort((a, b) => b.score - a.score);
-    leaderboard = leaderboard.slice(0, 5);
-    await store.set(BOARD_KEY, JSON.stringify(leaderboard));
+    trim(D().key);
+    await store.set(BOARDS_KEY, JSON.stringify(boards));
     await store.set(NAME_KEY, memName);
   }
 
+  // TOP 5 진입 여부는 지금 플레이한 단계 안에서만 따진다.
   function qualifies(s) {
     if (s <= 0) return false;
-    if (leaderboard.length < 5) return true;
-    return s > leaderboard[leaderboard.length - 1].score;
+    const b = boardOf(D().key);
+    if (b.length < 5) return true;
+    return s > b[b.length - 1].score;
   }
 
   let lastEntryId = null;
 
-  // 우측 상단 최고 기록: 리더보드 1위의 이름 + 점수 표시
+  // 우측 상단 최고 기록: 지금 고른 단계의 1위 (단계마다 따로 센다)
   function updateBestHUD() {
-    const top = leaderboard[0];
-    const shown = Math.max(best, top ? top.score : 0);
-    bestEl.textContent = shown;
-    bestNameEl.textContent = (top && top.score >= best) ? top.name : '';
+    const top = boardOf(D().key)[0];
+    const mine = bests[D().key] || 0;
+    bestEl.textContent = Math.max(mine, top ? top.score : 0);
+    bestNameEl.textContent = (top && top.score >= mine) ? top.name : '';
   }
 
   function renderBoard() {
     updateBestHUD();
-    if (!leaderboard.length) {
-      boardEl.style.display = 'none';
+    if (!DIFFS.some(d => boardOf(d.key).length)) {
+      boardEl.style.display = 'none';   // 어느 단계에도 기록이 없으면 통째로 감춘다
       return;
     }
     boardEl.style.display = 'block';
-    boardList.innerHTML = leaderboard.map((e, i) => {
-      const d = diffByKey(e.diff);
-      return `<li class="${e.id === lastEntryId ? 'me' : ''}">
-        <span class="rank">${i + 1}</span>
-        <span class="nm">${escapeHtml(e.name)}</span>
-        ${d ? `<span class="dg" style="color:${d.color}">${d.name.slice(0, 3)}</span>` : ''}
-        <span class="sc">${e.score}</span>
-      </li>`;
-    }).join('');
+    if (!viewKey) viewKey = D().key;
+
+    boardTabs.innerHTML = DIFFS.map(d =>
+      `<button data-k="${d.key}" class="${d.key === viewKey ? 'on' : ''}"
+        style="${d.key === viewKey ? `color:${d.color}` : ''}">${d.name}</button>`).join('');
+
+    const rows = boardOf(viewKey);
+    boardList.innerHTML = rows.length
+      ? rows.map((e, i) =>
+          `<li class="${e.id === lastEntryId ? 'me' : ''}">
+            <span class="rank">${i + 1}</span>
+            <span class="nm">${escapeHtml(e.name)}</span>
+            <span class="sc">${e.score}</span>
+          </li>`).join('')
+      : `<li class="empty">아직 기록이 없습니다</li>`;
   }
+
+  boardTabs.addEventListener('pointerdown', e => e.stopPropagation());
+  boardTabs.addEventListener('click', e => {
+    e.stopPropagation();
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    viewKey = btn.dataset.k;
+    renderBoard();
+  });
   // 선택 즉시 시작한다 — 'ready' 상태에서만 보인다.
   function renderPick() {
     diffPick.innerHTML = DIFFS.map((d, i) =>
@@ -555,7 +616,8 @@
   const BASE_W = () => Math.min(W * 0.62, 340);
 
   let state, blocks, mover, debris, rings, cam, camTarget;
-  let score, best = 0, combo, shake, hueBase, bgFlash;
+  let score, combo, shake, hueBase, bgFlash;
+  const bests = {};                // 이번 세션의 단계별 최고 점수
 
   function blockColor(i, l = 58) {
     return `hsl(${(hueBase + i * 7) % 360} 62% ${l}%)`;
@@ -579,6 +641,7 @@
     ovTag.style.display = 'block';
     ovTag.textContent = '딱 맞게 쌓으면 콤보!';
     entryBox.classList.remove('show');
+    viewKey = D().key;
     diffPick.classList.add('show');
     renderPick();
     updateDiffBadge();
@@ -657,8 +720,7 @@
     stopMusic();
     shake = reduceMotion ? 0 : 14;
     sfxGameOver();
-    const isBest = score > best;
-    if (isBest) best = score;
+    if (score > (bests[D().key] || 0)) bests[D().key] = score;
 
     overlay.classList.remove('hidden');
     ovTitle.innerHTML = `<span class="final">${score}</span>`;
@@ -683,7 +745,8 @@
     const name = (nameInput.value.trim() || '익명').slice(0, 12);
     memName = name;
     lastEntryId = Date.now() + '-' + Math.random().toString(36).slice(2, 6);
-    leaderboard.push({ id: lastEntryId, name, score, diff: D().key });
+    viewKey = D().key;             // 방금 세운 기록이 있는 탭을 보여준다
+    boardOf(D().key).push({ id: lastEntryId, name, score });
     await saveBoard();
     entryBox.classList.remove('show');
     state = 'over';
