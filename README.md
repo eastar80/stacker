@@ -5,6 +5,8 @@
 
 ## 실행
 
+배포판: https://eastar80.github.io/stacker/
+
 빌드 과정 없음. 정적 HTML 한 파일이 전부다.
 
 ```bash
@@ -31,6 +33,6 @@ npx serve .
 ## 로드맵
 
 - [ ] 파일 분리 (game.js / audio.js / storage.js / style.css)
-- [ ] GitHub Pages 또는 Vercel 배포
+- [x] GitHub Pages 배포 — `main` 푸시 시 자동 (`.github/workflows/pages.yml`)
 - [ ] 온라인 공유 리더보드 (백엔드 필요 — CLAUDE.md 참고)
 - [ ] 모바일 최적화 점검 (터치 지연, 세로 화면 레이아웃)
