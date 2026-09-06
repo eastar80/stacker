@@ -37,6 +37,7 @@
     line-height: 1.5;
   }
   #best strong { display: block; font-size: 24px; color: #eef1f8; font-variant-numeric: tabular-nums; }
+  #bestDiff { font-size: 11px; font-weight: 800; letter-spacing: .12em; }
   #bestName {
     display: block; font-size: 13px; color: rgba(238,241,248,.7);
     margin-top: 2px; max-width: 150px; margin-left: auto;
@@ -51,15 +52,6 @@
     backdrop-filter: blur(4px);
   }
   #muteBtn:active { transform: scale(.94); }
-
-  /* ---- 우측 상단 "최고 기록" 표시 끄기 ----------------------------------
-     단계별 TOP 5 리더보드와 내용이 겹치는 데다, 라벨에 단계가 없어서 기본 선택인
-     쉬운 단계 점수가 게임 전체의 기록처럼 읽혔다. 마크업과 updateBestHUD() 는
-     나중에 쓸 수 있도록 그대로 두고 표시만 끈다.
-     다시 켜려면 이 블록만 지우면 된다. */
-  #best { display: none; }
-  #muteBtn { margin-top: 0; }
-  /* ---------------------------------------------------------------------- */
 
   #combo {
     position: absolute; left: 50%; top: 22%;
@@ -264,7 +256,7 @@
       </div>
     </div>
     <div id="hudRight">
-      <div id="best">최고 기록<strong id="bestNum">0</strong><span id="bestName"></span></div>
+      <div id="best"><span id="bestDiff"></span> 최고 기록<strong id="bestNum">0</strong><span id="bestName"></span></div>
       <button id="muteBtn" title="소리 켜기/끄기">🔊</button>
     </div>
   </div>
@@ -296,6 +288,7 @@
   const scoreEl = document.getElementById('score');
   const bestEl = document.getElementById('bestNum');
   const bestNameEl = document.getElementById('bestName');
+  const bestDiffEl = document.getElementById('bestDiff');
   const comboEl = document.getElementById('combo');
   const overlay = document.getElementById('overlay');
   const ovTitle = document.getElementById('ovTitle');
@@ -431,7 +424,12 @@
   function updateBestHUD() {
     const top = boardOf(D().key)[0];
     const mine = bests[D().key] || 0;
-    bestEl.textContent = Math.max(mine, top ? top.score : 0);
+    const shown = Math.max(mine, top ? top.score : 0);
+    // 어느 단계의 기록인지 숫자 옆에서 바로 읽히게 한다 — 라벨이 "최고 기록" 뿐이면
+    // 기본 선택인 쉬운 단계 점수가 게임 전체의 기록처럼 읽힌다.
+    bestDiffEl.textContent = D().name;
+    bestDiffEl.style.color = D().color;
+    bestEl.textContent = shown > 0 ? shown : '—';
     bestNameEl.textContent = (top && top.score >= mine) ? top.name : '';
   }
 
