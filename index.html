@@ -198,6 +198,7 @@
   }
   #tutBar .cue.action { color: #ffe27a; }
   #tutBar .cue.go { color: rgba(238,241,248,.5); }
+  #tutBar .cue.watch { display: none; }
   #tutBar .cue.action { animation: cuePulse 1.1s ease-in-out infinite; }
   @keyframes cuePulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
 
@@ -717,7 +718,7 @@
     const layer = blocks.length;
     const fromLeft = layer % 2 === 1;
     const speed = D().base + Math.min(layer * D().gain, D().cap);
-    mover = { w: top.w, x: fromLeft ? -top.w : W, dir: fromLeft ? 1 : -1, speed, layer };
+    mover = { w: top.w, x: fromLeft ? -top.w : W, dir: fromLeft ? 1 : -1, speed, layer, stopAt: undefined };
   }
 
   function layerScreenY(layer) {
@@ -731,6 +732,8 @@
     if (tut) {
       if (musicOn && !musicStarted) startMusic();   // 자동 시작이었다면 여기서 소리를 연다
       if (tut.wait === 'go') { tutNext(); return; }
+      // 흘러 들어오는 중이면 누르기는 블록을 놓는 게 아니라 '빨리 감기'다
+      if (tut.wait === 'watch') { tutArrive(); return; }
       paused = false;
     }
 
@@ -852,11 +855,30 @@
     tutBar.classList.add('show');
   }
 
-  // 블록을 지정한 자리에 세워둔다
-  function tutHold(x) {
-    paused = true;
-    mover.x = x;
+  // 블록이 실제 속도로 흘러 들어오는 모습을 보여주다가 지정한 자리에서 멈춘다.
+  // 기다리기 답답하면 눌러서 건너뛸 수 있다 (tutArrive).
+  function tutGlide(x, msg, onStop) {
+    paused = false;
+    tut.tol = null;
+    tut.onStop = onStop;
     mover.minX = mover.maxX = undefined;
+    // 실제 게임처럼 화면 밖에서 들어오게 한다. 앞 단계에서 멈춘 자리에서 출발하면
+    // 목표가 코앞이라 움직임이 보이지 않는다 (C 단계가 62px, 0.4초밖에 안 됐다).
+    mover.x = -mover.w;
+    mover.dir = 1;
+    mover.stopAt = x;
+    tutSay('watch', msg, '');
+  }
+
+  // 목표 지점에 닿았다 — 세우고 안내를 띄운다
+  function tutArrive() {
+    if (!mover || mover.stopAt === undefined) return;
+    mover.x = mover.stopAt;
+    mover.stopAt = undefined;
+    paused = true;
+    const f = tut.onStop;
+    tut.onStop = null;
+    if (f) f();
   }
 
   // 아주 느리게, 탑 주변 half 픽셀 안에서만 왕복시킨다.
@@ -879,23 +901,25 @@
     const top = topBlock();
 
     if (step === 'A') {
-      tut.tol = null;
-      tutHold(top.x + D().tol + 45);       // 판정에서 벗어난 자리 — 잘려나갈 조각이 눈에 띄게
-      tutSay('action',
-        '움직이는 블록을 아래 탑에 쌓는 게임입니다. 지금은 설명을 위해 멈춰 두었습니다.',
-        `${PRESS}해서 블록을 놓아보세요`);
+      // 판정에서 벗어난 자리에 세운다 — 잘려나갈 조각이 눈에 띌 만큼
+      tutGlide(top.x + D().tol + 45,
+        '움직이는 블록을 아래 탑에 쌓는 게임입니다. 블록은 이렇게 좌우로 움직입니다.',
+        () => tutSay('action',
+          '설명을 위해 여기서 멈췄습니다. 탑과 조금 어긋난 자리입니다.',
+          `${PRESS}해서 블록을 놓아보세요`));
     }
     else if (step === 'B') {
+      mover.x = -mover.w - 20;
       tutSay('go',
         '탑과 겹치지 않은 부분은 이렇게 잘려 떨어집니다. 블록이 그만큼 좁아졌습니다.',
         '눌러서 계속');
     }
     else if (step === 'C') {
-      tut.tol = null;
-      tutHold(top.x);                       // 정확히 맞는 자리
-      tutSay('action',
-        '이번엔 딱 맞는 자리에 세워 두었습니다.',
-        `${PRESS}해보세요`);
+      tutGlide(top.x,                       // 정확히 맞는 자리
+        '이번엔 탑과 정확히 겹치는 자리에서 멈춥니다.',
+        () => tutSay('action',
+          '딱 맞는 자리입니다.',
+          `${PRESS}해보세요`));
     }
     else if (step === 'D') {
       tutSay('go',
@@ -1032,8 +1056,14 @@
         const loX = mover.minX !== undefined ? mover.minX : -20;
         const hiX = mover.maxX !== undefined ? mover.maxX : W + 20 - mover.w;
         mover.x += mover.dir * mover.speed;
-        if (mover.x < loX) { mover.x = loX; mover.dir = 1; }
-        if (mover.x > hiX) { mover.x = hiX; mover.dir = -1; }
+        // 튜터리얼에서 세우기로 한 자리에 닿았으면 딱 맞춰 멈춘다
+        if (mover.stopAt !== undefined &&
+            (mover.dir > 0 ? mover.x >= mover.stopAt : mover.x <= mover.stopAt)) {
+          tutArrive();
+        } else {
+          if (mover.x < loX) { mover.x = loX; mover.dir = 1; }
+          if (mover.x > hiX) { mover.x = hiX; mover.dir = -1; }
+        }
       }
       const y = layerScreenY(mover.layer);
       ctx.fillStyle = blockColor(mover.layer, 66);
