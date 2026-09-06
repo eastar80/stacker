@@ -125,6 +125,52 @@
   }
   #entryBox button:active { transform: scale(.96); }
 
+  #hudLeft { display: flex; flex-direction: column; gap: 9px; }
+
+  #diffBadge {
+    align-self: flex-start;
+    font-size: 11px; font-weight: 800; letter-spacing: .16em;
+    padding: 4px 11px; border-radius: 999px;
+    background: rgba(238,241,248,.1);
+  }
+
+  #scoreHelp {
+    font-size: 12px; line-height: 1.65;
+    color: rgba(238,241,248,.5);
+    background: rgba(12,16,26,.42);
+    border-radius: 10px; padding: 8px 12px;
+    backdrop-filter: blur(4px);
+    width: 176px;
+  }
+  #scoreHelp .row { display: flex; justify-content: space-between; gap: 12px; }
+  #scoreHelp b { font-weight: 700; color: rgba(238,241,248,.82); font-variant-numeric: tabular-nums; }
+  #scoreHelp .next {
+    margin-top: 5px; padding-top: 5px;
+    border-top: 1px solid rgba(238,241,248,.13);
+    color: #ffe27a;
+  }
+  #scoreHelp .next b { color: #ffe27a; }
+
+  #diffPick {
+    display: none; flex-wrap: wrap; gap: 8px; justify-content: center;
+    pointer-events: auto; max-width: 330px;
+  }
+  #diffPick.show { display: flex; }
+  #diffPick button {
+    flex: 1 1 138px;
+    padding: 10px 14px; border-radius: 12px; cursor: pointer;
+    border: 2px solid rgba(238,241,248,.16);
+    background: rgba(12,16,26,.55); color: #eef1f8;
+    font-family: inherit; text-align: left; line-height: 1.3;
+    backdrop-filter: blur(4px);
+  }
+  #diffPick button .dn { display: block; font-size: 14px; font-weight: 800; letter-spacing: .07em; }
+  #diffPick button .dk { display: block; font-size: 11px; color: rgba(238,241,248,.5); margin-top: 1px; }
+  #diffPick button.on { border-color: currentColor; background: rgba(238,241,248,.1); }
+  #diffPick button:active { transform: scale(.97); }
+
+  #board li .dg { font-size: 10px; font-weight: 700; letter-spacing: .08em; opacity: .75; }
+
   @media (prefers-reduced-motion: reduce) {
     #score.pop { transform: none; }
   }
@@ -134,10 +180,18 @@
 <div id="wrap">
   <canvas id="game"></canvas>
   <div id="hud">
-    <div id="score">0</div>
+    <div id="hudLeft">
+      <div id="score">0</div>
+      <div id="diffBadge"></div>
+      <div id="scoreHelp">
+        <div class="row"><span>착지</span><b>+1</b></div>
+        <div class="row"><span>PERFECT</span><b>+1 +콤보</b></div>
+        <div class="row next"><span>다음 PERFECT</span><b id="nextPts">+2</b></div>
+      </div>
+    </div>
     <div id="hudRight">
       <div id="best">최고 기록<strong id="bestNum">0</strong><span id="bestName"></span></div>
-      <button id="muteBtn" title="음악 켜기/끄기">🔊</button>
+      <button id="muteBtn" title="소리 켜기/끄기">🔊</button>
     </div>
   </div>
   <div id="combo"></div>
@@ -145,6 +199,7 @@
     <h1 id="ovTitle">STACKER</h1>
     <p id="ovMsg">탭 또는 스페이스로 블록을 쌓으세요</p>
     <div class="tag" id="ovTag">딱 맞게 쌓으면 콤보!</div>
+    <div id="diffPick"></div>
     <div id="entryBox">
       <input id="nameInput" maxlength="12" placeholder="이름을 입력하세요" autocomplete="off">
       <button id="saveBtn">기록 저장</button>
@@ -174,6 +229,9 @@
   const boardEl = document.getElementById('board');
   const boardList = document.getElementById('boardList');
   const muteBtn = document.getElementById('muteBtn');
+  const diffBadge = document.getElementById('diffBadge');
+  const diffPick = document.getElementById('diffPick');
+  const nextPtsEl = document.getElementById('nextPts');
 
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -187,9 +245,23 @@
   resize();
   addEventListener('resize', resize);
 
+  // ============ 난이도 ============
+  // base/gain/cap = 블록 속도(층마다 gain씩 빨라지고 cap까지), tol = PERFECT 판정 px,
+  // recover = PERFECT 시 블록 폭 회복 px. SKYLINE 이 기존 기본값이다.
+  const DIFFS = [
+    { key: 'foundation', name: 'FOUNDATION', ko: '토대',       base: 2.6, gain: 0.09, cap: 3.0, tol: 10, recover: 6, color: '#7ee0a8' },
+    { key: 'skyline',    name: 'SKYLINE',    ko: '스카이라인', base: 3.2, gain: 0.12, cap: 4.2, tol: 7,  recover: 4, color: '#7ac7ff' },
+    { key: 'vertigo',    name: 'VERTIGO',    ko: '현기증',     base: 4.0, gain: 0.16, cap: 5.4, tol: 5,  recover: 2, color: '#ffb066' },
+    { key: 'babel',      name: 'BABEL',      ko: '바벨',       base: 5.0, gain: 0.20, cap: 6.8, tol: 3,  recover: 0, color: '#ff7a8a' },
+  ];
+  let diffIdx = 1;
+  const D = () => DIFFS[diffIdx];
+  const diffByKey = k => DIFFS.find(d => d.key === k) || null;
+
   // ============ 저장소 (리더보드) ============
   const BOARD_KEY = 'stacker-leaderboard';
   const NAME_KEY = 'stacker-lastname';
+  const DIFF_KEY = 'stacker-difficulty';
   let memName = '';
   let leaderboard = [];
 
@@ -216,6 +288,11 @@
     } catch (e) { leaderboard = []; }
     const n = await store.get(NAME_KEY);
     if (n) memName = n;
+    const d = await store.get(DIFF_KEY);
+    const di = DIFFS.findIndex(x => x.key === d);
+    if (di >= 0) diffIdx = di;
+    renderPick();
+    updateDiffBadge();
     renderBoard();
   }
 
@@ -249,13 +326,45 @@
       return;
     }
     boardEl.style.display = 'block';
-    boardList.innerHTML = leaderboard.map((e, i) =>
-      `<li class="${e.id === lastEntryId ? 'me' : ''}">
+    boardList.innerHTML = leaderboard.map((e, i) => {
+      const d = diffByKey(e.diff);
+      return `<li class="${e.id === lastEntryId ? 'me' : ''}">
         <span class="rank">${i + 1}</span>
         <span class="nm">${escapeHtml(e.name)}</span>
+        ${d ? `<span class="dg" style="color:${d.color}">${d.name.slice(0, 3)}</span>` : ''}
         <span class="sc">${e.score}</span>
-      </li>`).join('');
+      </li>`;
+    }).join('');
   }
+  // 선택 즉시 시작한다 — 'ready' 상태에서만 보인다.
+  function renderPick() {
+    diffPick.innerHTML = DIFFS.map((d, i) =>
+      `<button data-i="${i}" class="${i === diffIdx ? 'on' : ''}" style="color:${d.color}">
+        <span class="dn">${d.name}</span><span class="dk">${d.ko}</span>
+      </button>`).join('');
+  }
+
+  diffPick.addEventListener('pointerdown', e => e.stopPropagation());
+  diffPick.addEventListener('click', e => {
+    e.stopPropagation();
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    diffIdx = +btn.dataset.i;
+    reset();          // 새 난이도로 판을 다시 깐다 (선택 표시도 여기서 갱신)
+    drop();           // 곧바로 시작 — 저장은 기다리지 않는다
+    store.set(DIFF_KEY, D().key);
+  });
+
+  function updateDiffBadge() {
+    diffBadge.textContent = D().name;
+    diffBadge.style.color = D().color;
+  }
+
+  function updateHelp() {
+    // 다음 PERFECT 는 콤보가 1 오른 뒤 1+콤보 점 → combo+2
+    nextPtsEl.textContent = '+' + (combo + 2);
+  }
+
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
@@ -385,17 +494,65 @@
     if (!musicOn) stopMusic();
   });
 
-  // 효과음
-  function beep(freq, dur = 0.07, type = 'sine', gain = 0.12) {
+  // ============ 효과음 ============
+  // 음소거 버튼은 음악과 효과음을 함께 끈다.
+  function sfxReady() {
+    if (!musicOn) return false;
     ensureAudio();
-    if (!ac) return;
+    return !!ac;
+  }
+
+  function beep(freq, dur = 0.07, type = 'sine', gain = 0.12) {
+    if (!sfxReady()) return;
     playTone(freq, ac.currentTime, dur, type, gain);
+  }
+
+  // 하강 스윕 — 킥/충격 공용
+  function sweep(t, f0, f1, dur, vol, type = 'sine') {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(f0, t);
+    o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(ac.destination);
+    o.start(t); o.stop(t + dur + 0.03);
+  }
+
+  // PERFECT — 콤보마다 반음씩 올라가는 상승 아르페지오 + 고역 반짝임
+  function sfxPerfect(n) {
+    if (!sfxReady()) return;
+    const t = ac.currentTime;
+    const base = 660 * Math.pow(2, Math.min(n - 1, 9) / 12);
+    [0, 4, 7, 12].forEach((semi, i) => {
+      playTone(base * Math.pow(2, semi / 12), t + i * 0.042, 0.3, 'triangle', 0.17 - i * 0.022);
+    });
+    playTone(base * 4, t + 0.13, 0.24, 'sine', 0.055);
+    if (n >= 3) playNoise(t, 0.05, 0.05, 9000);   // 콤보가 붙으면 반짝임 추가
+  }
+
+  // 어긋난 착지 — 둔탁한 충격 + 잘려나가는 파편 노이즈
+  function sfxCut() {
+    if (!sfxReady()) return;
+    const t = ac.currentTime;
+    sweep(t, 330, 105, 0.17, 0.14, 'square');
+    playNoise(t, 0.13, 0.1, 2400);
+  }
+
+  // 게임 오버 — 단조 3음 하강 후 바닥 충격
+  function sfxGameOver() {
+    if (!sfxReady()) return;
+    const t = ac.currentTime;
+    [0, -3, -8].forEach((semi, i) => {
+      playTone(440 * Math.pow(2, semi / 12), t + i * 0.13, 0.52, 'sawtooth', 0.13);
+    });
+    sweep(t + 0.36, 180, 30, 0.62, 0.42);
+    playNoise(t + 0.36, 0.55, 0.15, 400);
   }
 
   // ============ 게임 ============
   const BLOCK_H = 34;
   const BASE_W = () => Math.min(W * 0.62, 340);
-  const PERFECT_TOL = 7;
 
   let state, blocks, mover, debris, rings, cam, camTarget;
   let score, best = 0, combo, shake, hueBase, bgFlash;
@@ -422,6 +579,10 @@
     ovTag.style.display = 'block';
     ovTag.textContent = '딱 맞게 쌓으면 콤보!';
     entryBox.classList.remove('show');
+    diffPick.classList.add('show');
+    renderPick();
+    updateDiffBadge();
+    updateHelp();
     renderBoard();
   }
 
@@ -429,7 +590,7 @@
     const top = blocks[blocks.length - 1];
     const layer = blocks.length;
     const fromLeft = layer % 2 === 1;
-    const speed = 3.2 + Math.min(layer * 0.12, 4.2);
+    const speed = D().base + Math.min(layer * D().gain, D().cap);
     mover = { w: top.w, x: fromLeft ? -top.w : W, dir: fromLeft ? 1 : -1, speed, layer };
   }
 
@@ -441,6 +602,7 @@
     if (state === 'entry') return; // 이름 입력 중엔 무시
     if (state === 'ready') {
       state = 'play';
+      diffPick.classList.remove('show');
       overlay.classList.add('hidden');
       if (musicOn) startMusic();
       return;
@@ -458,13 +620,13 @@
       return;
     }
 
-    if (Math.abs(delta) <= PERFECT_TOL) {
+    if (Math.abs(delta) <= D().tol) {
       combo++;
-      blocks.push({ x: top.x, y: mover.layer, w: Math.min(top.w + 4, BASE_W()) });
+      blocks.push({ x: top.x, y: mover.layer, w: Math.min(top.w + D().recover, BASE_W()) });
       rings.push({ x: top.x + top.w / 2, layer: mover.layer, r: 10, max: 90 + combo * 10, a: 1 });
       score += 1 + combo;
       bgFlash = 0.35;
-      beep(520 + combo * 60, 0.09, 'triangle', 0.16);
+      sfxPerfect(combo);
       showCombo(combo);
     } else {
       combo = 0;
@@ -475,10 +637,11 @@
       const cutX = delta > 0 ? newX + newW : mover.x;
       debris.push({ x: cutX, layer: mover.layer, w: cutW, vy: 0, vx: delta > 0 ? 1.5 : -1.5, rot: 0, vr: (Math.random() - .5) * .15, color: blockColor(mover.layer) });
       score += 1;
-      beep(300, 0.05, 'square', 0.07);
+      sfxCut();
     }
 
     scoreEl.textContent = score;
+    updateHelp();
     scoreEl.classList.remove('pop'); void scoreEl.offsetWidth; scoreEl.classList.add('pop');
 
     camTarget = Math.max(0, (blocks.length - 6) * BLOCK_H);
@@ -493,13 +656,14 @@
   function gameOver() {
     stopMusic();
     shake = reduceMotion ? 0 : 14;
-    beep(140, 0.25, 'sawtooth', 0.14);
+    sfxGameOver();
     const isBest = score > best;
     if (isBest) best = score;
 
     overlay.classList.remove('hidden');
     ovTitle.innerHTML = `<span class="final">${score}</span>`;
     ovTag.style.display = 'none';
+    diffPick.classList.remove('show');
 
     if (qualifies(score)) {
       state = 'entry';
@@ -519,7 +683,7 @@
     const name = (nameInput.value.trim() || '익명').slice(0, 12);
     memName = name;
     lastEntryId = Date.now() + '-' + Math.random().toString(36).slice(2, 6);
-    leaderboard.push({ id: lastEntryId, name, score });
+    leaderboard.push({ id: lastEntryId, name, score, diff: D().key });
     await saveBoard();
     entryBox.classList.remove('show');
     state = 'over';
