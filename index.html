@@ -479,9 +479,11 @@
     renderBoard();
 
     // 처음 온 사람에게는 자동으로 띄운다 — 기록도 선택도 없고 마친 적도 없을 때만
-    const doneTut = await store.get(TUT_KEY);
-    const noRecords = !DIFFS.some(x => boardOf(x.key).length);
-    if (!doneTut && !d && noRecords && state === 'ready') tutStart();
+    if (TUTORIAL_ON) {
+      const doneTut = await store.get(TUT_KEY);
+      const noRecords = !DIFFS.some(x => boardOf(x.key).length);
+      if (!doneTut && !d && noRecords && state === 'ready') tutStart();
+    }
   }
 
   // 단계 구분이 없던 시절의 기록을 옮긴다. 그때 기본 설정이 지금의 SPROUT 이므로
@@ -849,7 +851,7 @@
     entryBox.classList.remove('show');
     viewKey = D().key;
     diffPick.classList.add('show');
-    tutBtn.classList.add('show');
+    if (TUTORIAL_ON) tutBtn.classList.add('show');
     renderPick();
     updateDiffBadge();
     updateHelp();
@@ -984,6 +986,9 @@
   // ============ 튜터리얼 ============
   // 블록 3개로 잘림 → PERFECT → 콤보를 차례로 보여준다. SEED 기준으로 진행하고,
   // 어떤 경우에도 게임 오버로 끝나거나 빠져나갈 수 없는 상태가 되지 않는다.
+  // 게임 방법이 단순해 튜터리얼 없이도 충분하다고 판단해 껐다. 코드는 지우지 않고
+  // 진입점만 막아두었으니, 되살리려면 이 값을 true 로 바꾸면 된다.
+  const TUTORIAL_ON = false;
   const TUT_KEY = 'stacker-tutorial-done';
   const isTouch = matchMedia('(hover: none)').matches;
   const PRESS = isTouch ? '화면을 탭' : '클릭(또는 스페이스바)';
@@ -1123,6 +1128,7 @@
   }
 
   function tutStart() {
+    if (!TUTORIAL_ON) return;
     diffIdx = 0;                    // 튜터리얼은 SEED 기준 (판정이 가장 넉넉하다)
     reset();
     tut = { step: null, wait: null, tol: null };
