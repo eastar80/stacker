@@ -1029,8 +1029,17 @@
   });
 
   // ============ 루프 ============
-  function frame() {
-    const flash = Math.max(0, bgFlash); bgFlash *= 0.9;
+  // dt = 60fps 기준으로 환산한 이번 프레임의 길이. 화면 주사율이 달라도 같은
+  // 속도로 움직이게 한다 — 프레임당 고정 거리로 움직이면 120Hz 화면에서 블록이
+  // 두 배 빨라져, 전체 랭킹에서 사람마다 다른 게임을 하는 셈이 된다.
+  // 탭을 다시 열었을 때 dt 가 크게 튀어 블록이 순간이동하지 않도록 상한을 둔다.
+  let lastT = 0;
+  function frame(now) {
+    if (now === undefined) now = performance.now();
+    const dt = lastT ? Math.max(0, Math.min((now - lastT) / (1000 / 60), 3)) : 1;
+    lastT = now;
+
+    const flash = Math.max(0, bgFlash); bgFlash *= Math.pow(0.9, dt);
     const bgHue = (hueBase + blocks.length * 2) % 360;
     const g = ctx.createLinearGradient(0, 0, 0, H);
     g.addColorStop(0, `hsl(${bgHue} 30% ${10 + flash * 20}%)`);
@@ -1038,12 +1047,12 @@
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, H);
 
-    cam += (camTarget - cam) * 0.08;
+    cam += (camTarget - cam) * (1 - Math.pow(1 - 0.08, dt));
     let sx = 0, sy = 0;
     if (shake > 0.5) {
       sx = (Math.random() - .5) * shake;
       sy = (Math.random() - .5) * shake;
-      shake *= 0.88;
+      shake *= Math.pow(0.88, dt);
     }
     ctx.save();
     ctx.translate(sx, sy);
@@ -1062,7 +1071,7 @@
         // 튜터리얼에서는 탑 주변으로 이동 범위를 묶어 완전히 빗나가는 일을 막는다
         const loX = mover.minX !== undefined ? mover.minX : -20;
         const hiX = mover.maxX !== undefined ? mover.maxX : W + 20 - mover.w;
-        mover.x += mover.dir * mover.speed;
+        mover.x += mover.dir * mover.speed * dt;
         // 튜터리얼에서 세우기로 한 자리에 닿았으면 딱 맞춰 멈춘다
         if (mover.stopAt !== undefined &&
             (mover.dir > 0 ? mover.x >= mover.stopAt : mover.x <= mover.stopAt)) {
@@ -1082,9 +1091,9 @@
     for (let i = debris.length - 1; i >= 0; i--) {
       const d = debris[i];
       if (!paused) {
-        d.vy += 0.6; d.rot += d.vr;
-        d.fall = (d.fall || 0) + d.vy;
-        d.x += d.vx;
+        d.vy += 0.6 * dt; d.rot += d.vr * dt;
+        d.fall = (d.fall || 0) + d.vy * dt;
+        d.x += d.vx * dt;
       }
       const y = layerScreenY(d.layer) + (d.fall || 0);
       ctx.save();
@@ -1099,8 +1108,8 @@
 
     for (let i = rings.length - 1; i >= 0; i--) {
       const r = rings[i];
-      r.r += (r.max - r.r) * 0.15;
-      r.a *= 0.92;
+      r.r += (r.max - r.r) * (1 - Math.pow(1 - 0.15, dt));
+      r.a *= Math.pow(0.92, dt);
       ctx.strokeStyle = `rgba(255,226,122,${r.a})`;
       ctx.lineWidth = 3;
       ctx.beginPath();
