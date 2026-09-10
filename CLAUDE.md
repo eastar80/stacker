@@ -10,8 +10,9 @@
 
 주요 모듈(파일 내 섹션 주석 기준):
 - **저장소**: `store` 어댑터 — window.storage(아티팩트) → localStorage → 메모리 폴백.
-  키 네 개: 단계별 리더보드 `stacker-boards`(단계 → TOP 5 배열), 마지막 이름
-  `stacker-lastname`, 난이도 선택 `stacker-difficulty`, 튜터리얼 완료 `stacker-tutorial-done`.
+  키 다섯 개: 단계별 리더보드 `stacker-boards`(단계 → TOP 5 배열), 마지막 이름
+  `stacker-lastname`, 난이도 선택 `stacker-difficulty`, 튜터리얼 완료 `stacker-tutorial-done`,
+  익명 플레이어 ID `stacker-player-id`(전체 랭킹에서 나를 구분하는 용도).
   단계 구분이 없던 시절의 `stacker-leaderboard` 는 첫 실행 때 이관하고 지우지 않는다.
 - **배경음악**: Web Audio 시퀀서. Am–F–C–G 진행, 138 BPM 시작, 탑 높이에 따라 템포 상승
   (`tempoBPM()`). 음원 파일 없이 오실레이터/노이즈버퍼로 생성. 25~30ms lookahead 스케줄러.
@@ -39,10 +40,12 @@
 
 ## 다음 작업 후보
 1. ~~**배포**~~: GitHub Pages 로 배포됨 (`.github/workflows/pages.yml`, `main` 푸시 시 자동)
-2. **온라인 리더보드**(진행 중): Supabase REST 로 간다. **JS 클라이언트 라이브러리는 쓰지
-   않는다** — `fetch` + `apikey` 헤더만으로 되므로 "외부 라이브러리 없음" 컨벤션을 지킨다.
-   순서: ~~델타타임 수정~~(완료) → 읽기 전용 전체 랭킹 → 제출 + 상한선 → (필요 시) 리플레이 검증.
-   부정 점수는 원리적으로 막을 수 없다(클라이언트 게임). 다만 **점수에 영향을 주는 난수가
-   없어** 드롭 시점만으로 게임이 그대로 재현되므로, 필요해지면 서버가 리플레이해 점수를
-   계산하는 방식이 가능하다 — 이때는 서버 코드가 필요하니 Workers/Edge Function 이 붙는다.
+2. ~~**온라인 리더보드**~~: Supabase REST 로 붙였다(`API_URL`/`API_KEY`). `fetch` 만 쓰고
+   JS 클라이언트 라이브러리는 쓰지 않는다. `online` 이 단계별 캐시(30초)이고, `loadOnline()`
+   은 `playerId` 가 준비되기 전에는 부르지 않는다 — `reset()` 이 `loadBoard()` 보다 먼저 돌아
+   그때 부르면 순위와 내 기록 표시가 빠진 채로 캐시된다.
+   남은 것: **리플레이 검증**. 부정 점수는 원리적으로 막을 수 없고(클라이언트 게임) 지금은
+   서버 `CHECK` 제약으로 말이 안 되는 값만 거른다. **점수에 영향을 주는 난수가 없어** 드롭
+   시점만으로 게임이 그대로 재현되므로, 서버가 리플레이해 점수를 계산하는 방식이 가능하다 —
+   이때는 서버 코드가 필요하니 Workers/Edge Function 이 붙는다.
 3. **게임플레이 확장**: 언락 테마(색 팔레트), 일일 챌린지(시드 고정), 장애물 층
