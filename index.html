@@ -202,6 +202,42 @@
     color: rgba(238,241,248,.4); padding: 10px 0;
   }
 
+  /* 플레이 중에도 바꿀 수 있도록 음소거 버튼 아래에 둔다. 화면이 좁으니 이름 대신
+     음표만 쓴다 — 꼬리가 많을수록 촘촘한 곡이다. */
+  #musicBtns {
+    margin-top: 8px;
+    display: flex; flex-direction: column; gap: 6px; align-items: flex-end;
+    /* 컨테이너는 버튼보다 넓다. auto 로 두면 옆의 빈 공간이 탭을 먹어 블록이
+       놓이지 않는다 — 버튼만 받게 한다. */
+    pointer-events: none;
+  }
+  #musicBtns button {
+    pointer-events: auto;
+    width: 34px; height: 34px; border-radius: 10px; cursor: pointer;
+    border: none; background: rgba(238,241,248,.1);
+    color: rgba(238,241,248,.45);
+    font-family: inherit; font-size: 15px; line-height: 1;
+    backdrop-filter: blur(4px);
+  }
+  #musicBtns button.on { background: rgba(238,241,248,.22); color: #eef1f8; }
+  #musicBtns button:active { transform: scale(.94); }
+  #musicBtns.muted { opacity: .4; }        /* 소리가 꺼져 있으면 흐리게 */
+
+  #musicPick {
+    display: none; align-items: center; gap: 6px;
+    pointer-events: auto;
+  }
+  #musicPick.show { display: flex; }
+  #musicPick .ico { font-size: 13px; color: rgba(238,241,248,.4); margin-right: 2px; }
+  #musicPick button {
+    padding: 6px 14px; border-radius: 999px; cursor: pointer;
+    border: none; background: rgba(238,241,248,.07);
+    color: rgba(238,241,248,.45);
+    font-family: inherit; font-size: 11px; font-weight: 700; letter-spacing: .1em;
+  }
+  #musicPick button.on { background: rgba(238,241,248,.16); color: #eef1f8; }
+  #musicPick button:active { transform: scale(.95); }
+
   #tutBtn {
     pointer-events: auto; cursor: pointer;
     padding: 11px 20px; border-radius: 12px;
@@ -290,6 +326,7 @@
     <div id="hudRight">
       <div id="best"><span id="bestDiff"></span> 최고 기록<strong id="bestNum">0</strong><span id="bestName"></span></div>
       <button id="muteBtn" title="소리 켜기/끄기">🔊</button>
+      <div id="musicBtns"></div>
     </div>
   </div>
   <div id="combo"></div>
@@ -300,6 +337,7 @@
     <p id="ovMsg">탭 또는 스페이스로 블록을 쌓으세요</p>
     <div class="tag" id="ovTag">딱 맞게 쌓으면 콤보!</div>
     <div id="diffPick"></div>
+    <div id="musicPick"></div>
     <button id="tutBtn">처음이신가요? 튜터리얼 →</button>
     <div id="entryBox">
       <input id="nameInput" maxlength="12" placeholder="이름을 입력하세요" autocomplete="off">
@@ -337,6 +375,8 @@
   const nextPtsEl = document.getElementById('nextPts');
   const boardTabs = document.getElementById('boardTabs');
   const scopeTabs = document.getElementById('scopeTabs');
+  const musicPick = document.getElementById('musicPick');
+  const musicBtns = document.getElementById('musicBtns');
   const tutBtn = document.getElementById('tutBtn');
   const tutSkip = document.getElementById('tutSkip');
   const tutBar = document.getElementById('tutBar');
@@ -477,6 +517,11 @@
         : Date.now() + '-' + Math.random().toString(36).slice(2, 10);
       store.set(PLAYER_KEY, playerId);
     }
+
+    const m = await store.get(MUSIC_KEY);
+    const mi = TRACKS.findIndex(t => t.key === m);
+    if (mi >= 0) trackIdx = mi;
+    renderMusic();
 
     const d = await store.get(DIFF_KEY);
     const di = DIFFS.findIndex(x => x.key === d);
@@ -664,18 +709,6 @@
 
   const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
 
-  // Am - F - C - G (69=A4 기준 미디 노트)
-  const CHORDS = [
-    { root: 45, tones: [57, 60, 64] },  // Am: A3 C4 E4
-    { root: 41, tones: [57, 60, 65] },  // F:  A3 C4 F4
-    { root: 48, tones: [60, 64, 67] },  // C:  C4 E4 G4
-    { root: 43, tones: [59, 62, 67] },  // G:  B3 D4 G4
-  ];
-  // 16스텝 리드 멜로디 (코드톤 인덱스, -1 = 쉼표, +12 = 옥타브 업 표시용 오브젝트)
-  const LEAD_PAT = [
-    [0,-1,1,-1, 2,-1,1,0, -1,1,-1,2, 3,2,1,-1],
-    [0,-1,1,-1, 2,-1,3,-1, 2,-1,1,-1, 0,1,2,3],
-  ];
 
   function playTone(freq, t, dur, type, vol) {
     const o = ac.createOscillator(), g = ac.createGain();
@@ -695,11 +728,95 @@
     s.start(t); s.stop(t + dur + 0.02);
   }
 
+  // 킥 (짧은 사인 스윕)
+  function playKick(t, vol = 0.4) {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(140, t);
+    o.frequency.exponentialRampToValueAtTime(45, t + 0.09);
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.11);
+    o.connect(g); g.connect(ac.destination);
+    o.start(t); o.stop(t + 0.13);
+  }
+
+  // ============ 곡 ============
+  // 코드는 69=A4 기준 미디 노트. lead 는 16스텝 코드톤 인덱스(-1 쉼표, 3 이상은 옥타브 업).
+  // step() 이 그 곡의 한 스텝을 연주한다 — 악기 구성과 리듬이 곡마다 다르다.
+  const MUSIC_KEY = 'stacker-music';
+  const TRACKS = [
+    {
+      key: 'pulse', name: 'PULSE', ko: '기본', icon: '♫', bpm: 138, ramp: 0.6,
+      chords: [                                    // Am - F - C - G
+        { root: 45, tones: [57, 60, 64] },
+        { root: 41, tones: [57, 60, 65] },
+        { root: 48, tones: [60, 64, 67] },
+        { root: 43, tones: [59, 62, 67] },
+      ],
+      lead: [
+        [0,-1,1,-1, 2,-1,1,0, -1,1,-1,2, 3,2,1,-1],
+        [0,-1,1,-1, 2,-1,3,-1, 2,-1,1,-1, 0,1,2,3],
+      ],
+      step(pos, t, dur, ch, li) {
+        // 베이스: 1,3박 루트 / 2,4박 5도
+        if (pos % 4 === 0) playTone(mtof((pos === 4 || pos === 12) ? ch.root + 7 : ch.root), t, dur * 3.2, 'triangle', 0.16);
+        if (li >= 0) playTone(mtof(ch.tones[li % 3] + (li >= 3 ? 12 : 0) + 12), t, dur * 1.6, 'square', 0.05);
+        if (pos % 2 === 0) playNoise(t, 0.03, pos % 4 === 2 ? 0.09 : 0.05, 7000);   // 하이햇 8분
+        if (pos === 4 || pos === 12) playNoise(t, 0.09, 0.11, 1800);                // 스네어 2,4박
+        if (pos === 0 || pos === 8) playKick(t);
+      },
+    },
+    {
+      key: 'drift', name: 'DRIFT', ko: '잔잔', icon: '♪', bpm: 104, ramp: 0.3,
+      chords: [                                    // Dm - G - C - Am (ii-V-I-vi)
+        { root: 38, tones: [57, 62, 65] },
+        { root: 43, tones: [59, 62, 67] },
+        { root: 48, tones: [60, 64, 67] },
+        { root: 45, tones: [57, 60, 64] },
+      ],
+      lead: [
+        [0,-1,-1,-1, 2,-1,-1,-1, 4,-1,-1,-1, 2,-1,-1,-1],
+        [1,-1,-1,-1, 3,-1,-1,-1, 2,-1,-1,-1, 5,-1,-1,-1],
+      ],
+      step(pos, t, dur, ch, li) {
+        if (pos === 0) playTone(mtof(ch.root), t, dur * 14, 'sine', 0.17);          // 길게 끄는 베이스
+        if (pos === 0 || pos === 8)                                                 // 패드 (코드톤 3개)
+          ch.tones.forEach(n => playTone(mtof(n), t, dur * 7, 'triangle', 0.035));
+        if (li >= 0) playTone(mtof(ch.tones[li % 3] + (li >= 3 ? 12 : 0) + 12), t, dur * 3.2, 'triangle', 0.07);
+        if (pos % 8 === 4) playNoise(t, 0.05, 0.035, 9000);                         // 아주 가벼운 하이햇
+        if (pos === 0) playKick(t, 0.22);
+      },
+    },
+    {
+      key: 'rush', name: 'RUSH', ko: '질주', icon: '♬', bpm: 158, ramp: 0.9,
+      chords: [                                    // Am - F - Dm - E (화성단음계의 긴장)
+        { root: 45, tones: [57, 60, 64] },
+        { root: 41, tones: [57, 60, 65] },
+        { root: 38, tones: [57, 62, 65] },
+        { root: 40, tones: [56, 59, 64] },
+      ],
+      lead: [
+        [0,0,-1,2, 1,-1,3,-1, 2,2,-1,4, 3,-1,1,-1],
+        [0,-1,3,-1, 4,-1,2,-1, 5,-1,3,-1, 4,3,2,1],
+      ],
+      step(pos, t, dur, ch, li) {
+        // 8분음표로 내달리는 베이스, 당김 지점에서 5도
+        if (pos % 2 === 0) playTone(mtof(ch.root + (pos % 8 === 6 ? 7 : 0)), t, dur * 1.4, 'sawtooth', 0.1);
+        if (li >= 0) playTone(mtof(ch.tones[li % 3] + (li >= 3 ? 12 : 0) + 12), t, dur * 1.2, 'square', 0.055);
+        playNoise(t, 0.02, pos % 4 === 0 ? 0.055 : 0.03, 8000);                     // 하이햇 16분
+        if (pos === 4 || pos === 12) playNoise(t, 0.1, 0.13, 1600);                 // 스네어
+        if (pos === 0 || pos === 6 || pos === 8 || pos === 14) playKick(t, 0.38);   // 당김 킥
+      },
+    },
+  ];
+  let trackIdx = 0;
+  const T = () => TRACKS[trackIdx];
+
   let step = 0, nextStepTime = 0, schedTimer = null;
   function tempoBPM() {
     // 층이 올라갈수록 살짝 빨라짐 (긴장감)
     const h = blocks ? blocks.length : 0;
-    return 138 + Math.min(h, 40) * 0.6;
+    return T().bpm + Math.min(h, 40) * T().ramp;
   }
 
   function scheduler() {
@@ -713,37 +830,11 @@
   }
 
   function scheduleStep(s, t, dur) {
-    const bar = Math.floor(s / 16) % 4;
+    const tr = T();
     const pos = s % 16;
-    const chord = CHORDS[bar];
-    const patIdx = Math.floor(s / 32) % LEAD_PAT.length;
-
-    // 베이스 (triangle): 1,3박 루트 / 2,4박 5도
-    if (pos % 4 === 0) {
-      const note = (pos === 4 || pos === 12) ? chord.root + 7 : chord.root;
-      playTone(mtof(note), t, dur * 3.2, 'triangle', 0.16);
-    }
-    // 리드 아르페지오 (square, 얇게)
-    const li = LEAD_PAT[patIdx][pos];
-    if (li >= 0) {
-      const tone = chord.tones[li % 3] + (li >= 3 ? 12 : 0);
-      playTone(mtof(tone + 12), t, dur * 1.6, 'square', 0.05);
-    }
-    // 하이햇: 8분음표 오프비트
-    if (pos % 2 === 0) playNoise(t, 0.03, pos % 4 === 2 ? 0.09 : 0.05, 7000);
-    // 스네어: 2,4박
-    if (pos === 4 || pos === 12) playNoise(t, 0.09, 0.11, 1800);
-    // 킥 (짧은 사인 스윕)
-    if (pos === 0 || pos === 8) {
-      const o = ac.createOscillator(), g = ac.createGain();
-      o.type = 'sine';
-      o.frequency.setValueAtTime(140, t);
-      o.frequency.exponentialRampToValueAtTime(45, t + 0.09);
-      g.gain.setValueAtTime(0.4, t);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.11);
-      o.connect(g); g.connect(ac.destination);
-      o.start(t); o.stop(t + 0.13);
-    }
+    const chord = tr.chords[Math.floor(s / 16) % 4];
+    const li = tr.lead[Math.floor(s / 32) % tr.lead.length][pos];
+    tr.step(pos, t, dur, chord, li);
   }
 
   function startMusic() {
@@ -759,11 +850,38 @@
     if (schedTimer) { clearInterval(schedTimer); schedTimer = null; }
   }
 
+  // 시작 화면(이름)과 HUD(음표) 두 곳에 같은 선택을 그린다
+  function renderMusic() {
+    musicPick.innerHTML = '<span class="ico">♪</span>' + TRACKS.map((t, i) =>
+      `<button data-i="${i}" class="${i === trackIdx ? 'on' : ''}" title="${t.ko}">${t.name}</button>`).join('');
+    musicBtns.innerHTML = TRACKS.map((t, i) =>
+      `<button data-i="${i}" class="${i === trackIdx ? 'on' : ''}" title="${t.name} · ${t.ko}">${t.icon}</button>`).join('');
+    musicBtns.classList.toggle('muted', !musicOn);
+  }
+
+  function pickTrack(i) {
+    trackIdx = i;
+    renderMusic();
+    store.set(MUSIC_KEY, T().key);
+    if (musicStarted) { stopMusic(); startMusic(); }   // 연주 중이면 바로 바꿔 들려준다
+  }
+
+  // 플레이 중에도 눌러야 하므로 블록이 떨어지지 않게 이벤트를 막는다
+  [musicPick, musicBtns].forEach(el => {
+    el.addEventListener('pointerdown', e => e.stopPropagation());
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      const btn = e.target.closest('button');
+      if (btn) pickTrack(+btn.dataset.i);
+    });
+  });
+
   muteBtn.addEventListener('pointerdown', e => e.stopPropagation());
   muteBtn.addEventListener('click', e => {
     e.stopPropagation();
     musicOn = !musicOn;
     muteBtn.textContent = musicOn ? '🔊' : '🔇';
+    musicBtns.classList.toggle('muted', !musicOn);
     if (musicOn && state === 'play') startMusic();
     if (!musicOn) stopMusic();
   });
@@ -858,6 +976,8 @@
     entryBox.classList.remove('show');
     viewKey = D().key;
     diffPick.classList.add('show');
+    musicPick.classList.add('show');
+    renderMusic();
     if (TUTORIAL_ON) tutBtn.classList.add('show');
     renderPick();
     updateDiffBadge();
@@ -892,6 +1012,7 @@
     if (state === 'ready') {
       state = 'play';
       diffPick.classList.remove('show');
+      musicPick.classList.remove('show');
       tutBtn.classList.remove('show');
       overlay.classList.add('hidden');
       if (musicOn) startMusic();
@@ -968,6 +1089,7 @@
     ovTitle.innerHTML = `<span class="final">${score}</span>`;
     ovTag.style.display = 'none';
     diffPick.classList.remove('show');
+    musicPick.classList.remove('show');
     tutBtn.classList.remove('show');
 
     if (qualifies(score)) {
@@ -1151,6 +1273,7 @@
     state = 'play';
     overlay.classList.add('hidden');
     diffPick.classList.remove('show');
+    musicPick.classList.remove('show');
     tutBtn.classList.remove('show');
     tutSkip.classList.add('show');
     tutGo('A');
