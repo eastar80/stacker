@@ -919,14 +919,12 @@
       combo++;
       const newW = Math.min(top.w + D().recover, BASE_W());
       const added = newW - top.w;              // 폭 상한에 걸리면 0 이 된다
-      // 치우친 쪽으로 늘린다. 늘 왼쪽 끝을 고정하고 늘리면(예전 방식) 오른쪽으로만
+      // 블록이 가던 방향으로 늘린다. 늘 왼쪽 끝을 고정하고 늘리면(예전 방식) 오른쪽으로만
       // 자라서 콤보가 쌓일수록 탑이 한쪽으로 밀려났다.
-      // 블록 폭이 아래 블록과 같아 PERFECT 면 양끝이 동시에 맞으므로, 판정 범위 안에서
-      // 어느 쪽으로 치우쳤는지(delta 부호)를 기준으로 삼는다.
-      const DEAD = tol * 0.2;                  // 이 안쪽은 정중앙으로 보고 양쪽에 절반씩
-      let newX = delta > DEAD  ? top.x             // 오른쪽으로 치우침 → 오른쪽이 늘어난다
-               : delta < -DEAD ? top.x - added     // 왼쪽으로 치우침  → 왼쪽이 늘어난다
-               : top.x - added / 2;                // 정중앙 → 양쪽으로 절반씩
+      // 진행 방향은 층마다 번갈아 시작하므로, 바로바로 놓는 사람은 좌우가 저절로 번갈아
+      // 자라 탑이 한쪽으로 밀리지 않는다. 기다렸다 되돌아온 뒤 놓으면 방향을 고를 수 있다.
+      let newX = mover.dir > 0 ? top.x             // 오른쪽으로 가는 중 → 오른쪽이 늘어난다
+                               : top.x - added;    // 왼쪽으로 가는 중  → 왼쪽이 늘어난다
       newX = Math.max(0, Math.min(newX, W - newW));   // 화면 밖으로는 자라지 않는다
       blocks.push({ x: newX, y: mover.layer, w: newW });
       rings.push({ x: newX + newW / 2, layer: mover.layer, r: 10, max: 90 + combo * 10, a: 1 });
