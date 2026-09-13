@@ -202,6 +202,27 @@
     color: rgba(238,241,248,.4); padding: 10px 0;
   }
 
+  /* 플레이 중에도 바꿀 수 있도록 음소거 버튼 아래에 둔다. 화면이 좁으니 이름 대신
+     음표만 쓴다 — 꼬리가 많을수록 촘촘한 곡이다. */
+  #musicBtns {
+    margin-top: 8px;
+    display: flex; flex-direction: column; gap: 6px; align-items: flex-end;
+    /* 컨테이너는 버튼보다 넓다. auto 로 두면 옆의 빈 공간이 탭을 먹어 블록이
+       놓이지 않는다 — 버튼만 받게 한다. */
+    pointer-events: none;
+  }
+  #musicBtns button {
+    pointer-events: auto;
+    width: 34px; height: 34px; border-radius: 10px; cursor: pointer;
+    border: none; background: rgba(238,241,248,.1);
+    color: rgba(238,241,248,.45);
+    font-family: inherit; font-size: 15px; line-height: 1;
+    backdrop-filter: blur(4px);
+  }
+  #musicBtns button.on { background: rgba(238,241,248,.22); color: #eef1f8; }
+  #musicBtns button:active { transform: scale(.94); }
+  #musicBtns.muted { opacity: .4; }        /* 소리가 꺼져 있으면 흐리게 */
+
   #musicPick {
     display: none; align-items: center; gap: 6px;
     pointer-events: auto;
@@ -305,6 +326,7 @@
     <div id="hudRight">
       <div id="best"><span id="bestDiff"></span> 최고 기록<strong id="bestNum">0</strong><span id="bestName"></span></div>
       <button id="muteBtn" title="소리 켜기/끄기">🔊</button>
+      <div id="musicBtns"></div>
     </div>
   </div>
   <div id="combo"></div>
@@ -354,6 +376,7 @@
   const boardTabs = document.getElementById('boardTabs');
   const scopeTabs = document.getElementById('scopeTabs');
   const musicPick = document.getElementById('musicPick');
+  const musicBtns = document.getElementById('musicBtns');
   const tutBtn = document.getElementById('tutBtn');
   const tutSkip = document.getElementById('tutSkip');
   const tutBar = document.getElementById('tutBar');
@@ -723,7 +746,7 @@
   const MUSIC_KEY = 'stacker-music';
   const TRACKS = [
     {
-      key: 'pulse', name: 'PULSE', ko: '기본', bpm: 138, ramp: 0.6,
+      key: 'pulse', name: 'PULSE', ko: '기본', icon: '♫', bpm: 138, ramp: 0.6,
       chords: [                                    // Am - F - C - G
         { root: 45, tones: [57, 60, 64] },
         { root: 41, tones: [57, 60, 65] },
@@ -744,7 +767,7 @@
       },
     },
     {
-      key: 'drift', name: 'DRIFT', ko: '잔잔', bpm: 104, ramp: 0.3,
+      key: 'drift', name: 'DRIFT', ko: '잔잔', icon: '♪', bpm: 104, ramp: 0.3,
       chords: [                                    // Dm - G - C - Am (ii-V-I-vi)
         { root: 38, tones: [57, 62, 65] },
         { root: 43, tones: [59, 62, 67] },
@@ -765,7 +788,7 @@
       },
     },
     {
-      key: 'rush', name: 'RUSH', ko: '질주', bpm: 158, ramp: 0.9,
+      key: 'rush', name: 'RUSH', ko: '질주', icon: '♬', bpm: 158, ramp: 0.9,
       chords: [                                    // Am - F - Dm - E (화성단음계의 긴장)
         { root: 45, tones: [57, 60, 64] },
         { root: 41, tones: [57, 60, 65] },
@@ -827,20 +850,30 @@
     if (schedTimer) { clearInterval(schedTimer); schedTimer = null; }
   }
 
+  // 시작 화면(이름)과 HUD(음표) 두 곳에 같은 선택을 그린다
   function renderMusic() {
     musicPick.innerHTML = '<span class="ico">♪</span>' + TRACKS.map((t, i) =>
       `<button data-i="${i}" class="${i === trackIdx ? 'on' : ''}" title="${t.ko}">${t.name}</button>`).join('');
+    musicBtns.innerHTML = TRACKS.map((t, i) =>
+      `<button data-i="${i}" class="${i === trackIdx ? 'on' : ''}" title="${t.name} · ${t.ko}">${t.icon}</button>`).join('');
+    musicBtns.classList.toggle('muted', !musicOn);
   }
 
-  musicPick.addEventListener('pointerdown', e => e.stopPropagation());
-  musicPick.addEventListener('click', e => {
-    e.stopPropagation();
-    const btn = e.target.closest('button');
-    if (!btn) return;
-    trackIdx = +btn.dataset.i;
+  function pickTrack(i) {
+    trackIdx = i;
     renderMusic();
     store.set(MUSIC_KEY, T().key);
     if (musicStarted) { stopMusic(); startMusic(); }   // 연주 중이면 바로 바꿔 들려준다
+  }
+
+  // 플레이 중에도 눌러야 하므로 블록이 떨어지지 않게 이벤트를 막는다
+  [musicPick, musicBtns].forEach(el => {
+    el.addEventListener('pointerdown', e => e.stopPropagation());
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      const btn = e.target.closest('button');
+      if (btn) pickTrack(+btn.dataset.i);
+    });
   });
 
   muteBtn.addEventListener('pointerdown', e => e.stopPropagation());
@@ -848,6 +881,7 @@
     e.stopPropagation();
     musicOn = !musicOn;
     muteBtn.textContent = musicOn ? '🔊' : '🔇';
+    musicBtns.classList.toggle('muted', !musicOn);
     if (musicOn && state === 'play') startMusic();
     if (!musicOn) stopMusic();
   });
