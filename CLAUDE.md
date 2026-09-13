@@ -12,10 +12,14 @@
 - **저장소**: `store` 어댑터 — window.storage(아티팩트) → localStorage → 메모리 폴백.
   키 다섯 개: 단계별 리더보드 `stacker-boards`(단계 → TOP 5 배열), 마지막 이름
   `stacker-lastname`, 난이도 선택 `stacker-difficulty`, 튜터리얼 완료 `stacker-tutorial-done`,
-  익명 플레이어 ID `stacker-player-id`(전체 랭킹에서 나를 구분하는 용도).
+  익명 플레이어 ID `stacker-player-id`(전체 랭킹에서 나를 구분하는 용도),
+  배경음악 선택 `stacker-music`.
   단계 구분이 없던 시절의 `stacker-leaderboard` 는 첫 실행 때 이관하고 지우지 않는다.
-- **배경음악**: Web Audio 시퀀서. Am–F–C–G 진행, 138 BPM 시작, 탑 높이에 따라 템포 상승
-  (`tempoBPM()`). 음원 파일 없이 오실레이터/노이즈버퍼로 생성. 25~30ms lookahead 스케줄러.
+- **배경음악**: Web Audio 시퀀서. 음원 파일 없이 오실레이터/노이즈버퍼로 생성,
+  25~30ms lookahead 스케줄러. **곡은 `TRACKS` 배열에 담긴다** — PULSE(기본, 기존 곡)
+  / DRIFT(잔잔) / RUSH(질주). 각 곡이 코드 진행·리드 패턴·BPM·템포 상승률과, 그 곡의 한
+  스텝을 연주하는 `step()` 을 갖는다. `scheduleStep()` 은 코드와 리드 인덱스만 골라
+  `step()` 에 넘긴다. 곡을 추가하려면 배열에 항목 하나를 더하면 된다.
 - **난이도**: `DIFFS` 배열 하나가 전부다 — SEED/SPROUT/BLOOM/CROWN 이 속도(base/gain/cap),
   PERFECT 판정(tol), 폭 회복(recover)을 함께 정한다. 수치를 바꾸려면 이 표만 고치면 된다.
   SPROUT 이 단계 구분 이전의 기본값이다.
