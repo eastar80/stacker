@@ -449,6 +449,7 @@
   const online = {};               // 단계별·정렬별 { state, rows, rank, at }
   let sortBy = 'score';            // 'score' | 'combo'
   const cacheKey = stage => `${stage}|${sortBy}`;
+  let submitErr = null;            // 방금 제출이 거부/실패한 단계
 
   const apiHeaders = () => ({ apikey: API_KEY, Authorization: `Bearer ${API_KEY}` });
   // 응답이 없으면 마냥 "불러오는 중" 에 머무르지 않고 실패로 떨어뜨려 내 기록을 보여준다
@@ -510,11 +511,18 @@
       headers: { ...apiHeaders(), 'Content-Type': 'application/json', Prefer: 'return=minimal' },
       body: JSON.stringify({ stage, name, score, combo, player_id: playerId }),
       signal: timeout(),
-    }).then(() => {
+    }).then(r => {
+      // fetch 는 400 같은 거부 응답에도 실패로 떨어지지 않는다. 직접 확인하지 않으면
+      // 서버가 점수를 거부해도(예: 점수 상한 초과) 성공으로 보고 조용히 넘어간다.
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      submitErr = null;
       // 새 기록이 보이도록 이 단계의 캐시를 정렬별로 모두 버리고
       Object.keys(online).forEach(k => { if (k.startsWith(stage + '|')) delete online[k]; });
       if (viewKey === stage && scope === 'all') renderBoard();   // 그 자리에서 다시 그린다
-    }).catch(() => {});
+    }).catch(() => {
+      submitErr = stage;                       // 올리지 못했다는 것을 화면에 알린다
+      if (viewKey === stage && scope === 'all') renderBoard();
+    });
   }
 
   // ============ 저장소 (리더보드) ============
@@ -692,7 +700,9 @@
       return;
     }
     // 이름은 다른 사람이 입력한 값이다 — 반드시 이스케이프한다
-    let html = c.rows.length
+    let html = submitErr === viewKey
+      ? `<li class="empty">방금 기록을 전체 랭킹에 올리지 못했습니다<br>내 기록에는 남아 있습니다</li>` : '';
+    html += c.rows.length
       ? head() + c.rows.map((e, i) => row(e.player_id === playerId ? 'mine' : '', i + 1, e.name, e.score, e.combo)).join('')
       : `<li class="empty">아직 아무도 기록을 남기지 않았습니다</li>`;
     // 상위 목록에 내가 없으면 내 순위를 맨 아래에 고정한다
@@ -1038,6 +1048,7 @@
     debris = [];
     rings = [];
     score = 0; combo = 0; maxCombo = 0; shake = 0; bgFlash = 0;
+    submitErr = null;
     cam = 0; camTarget = 0;
     scoreEl.textContent = '0';
     const w = BASE_W();
