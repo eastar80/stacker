@@ -106,11 +106,29 @@
   #board ol { list-style: none; }
   #board li {
     display: flex; justify-content: space-between; align-items: baseline;
-    padding: 5px 0; gap: 12px;
+    padding: 5px 0; gap: 8px;
   }
+  #board li .cb {
+    width: 30px; text-align: right;
+    color: rgba(238,241,248,.5); font-variant-numeric: tabular-nums;
+  }
+  /* 열 이름이자 정렬 버튼. 줄 전체가 아니라 버튼만 탭을 받는다 —
+     컨테이너에 주면 옆의 빈 공간이 탭을 먹는다. */
+  #board li.head {
+    padding: 0 0 6px; margin-bottom: 3px;
+    border-bottom: 1px solid rgba(238,241,248,.1);
+  }
+  #board li.head button {
+    border: none; background: transparent; cursor: pointer;
+    font-family: inherit; font-size: 11px; font-weight: 700; letter-spacing: .04em;
+    color: rgba(238,241,248,.35); padding: 0;
+    pointer-events: auto;
+  }
+  #board li.head button.on { color: #eef1f8; }
+  #board li.head button:active { transform: scale(.94); }
   #board li .rank { color: rgba(238,241,248,.45); width: 18px; font-variant-numeric: tabular-nums; }
   #board li .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #board li .sc { font-weight: 700; font-variant-numeric: tabular-nums; }
+  #board li .sc { width: 48px; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
   #board li.me { color: #ffe27a; }
   #board .empty { text-align: center; color: rgba(238,241,248,.4); padding: 8px 0; }
 
@@ -428,7 +446,9 @@
 
   let playerId = '';
   let scope = 'all';               // 'all' = 전체 랭킹, 'me' = 이 기기의 기록
-  const online = {};               // 단계별 { state, rows, rank, at }
+  const online = {};               // 단계별·정렬별 { state, rows, rank, at }
+  let sortBy = 'score';            // 'score' | 'combo'
+  const cacheKey = stage => `${stage}|${sortBy}`;
   let submitErr = null;            // 방금 제출이 거부/실패한 단계
 
   const apiHeaders = () => ({ apikey: API_KEY, Authorization: `Bearer ${API_KEY}` });
@@ -436,50 +456,68 @@
   const timeout = () => (AbortSignal.timeout ? AbortSignal.timeout(6000) : undefined);
 
   async function fetchTop(stage) {
-    const q = `?stage=eq.${stage}&select=name,score,player_id&order=score.desc,created_at.asc&limit=${TOP_N}`;
+    // select=* 로 받는다. combo 컬럼을 아직 만들지 않은 서버에서도 질의가 깨지지 않는다.
+    // combo 는 나중에 생긴 칸이라 예전 기록은 NULL 이다 — 내림차순에서 NULL 이 앞에
+    // 오지 않도록 nullslast 를 준다.
+    const order = sortBy === 'combo'
+      ? 'combo.desc.nullslast,score.desc,created_at.asc'
+      : 'score.desc,created_at.asc';
+    const q = `?stage=eq.${stage}&select=*&order=${order}&limit=${TOP_N}`;
     const r = await fetch(API_URL + q, { headers: apiHeaders(), signal: timeout() });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     return r.json();
   }
 
-  // 내 점수보다 높은 기록이 몇 개인지 세어 순위를 낸다 (Content-Range: "0-0/123")
-  async function fetchRank(stage, score) {
-    const q = `?stage=eq.${stage}&score=gt.${score}&select=id`;
+  // 지금 정렬 기준으로 나보다 위에 있는 기록이 몇 개인지 세어 순위를 낸다
+  // (Content-Range: "0-0/123"). NULL 인 combo 는 비교에서 빠지므로 예전 기록은 세지 않는다.
+  async function fetchRank(stage, value) {
+    const q = `?stage=eq.${stage}&${sortBy}=gt.${value}&select=id`;
     const r = await fetch(API_URL + q, { headers: { ...apiHeaders(), Prefer: 'count=exact', Range: '0-0' }, signal: timeout() });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const total = parseInt((r.headers.get('content-range') || '').split('/')[1], 10);
     return Number.isFinite(total) ? total + 1 : null;
   }
 
+  // 내 최고값 — 정렬 기준에 맞춰 고른다
+  function myBest(stage) {
+    const rows = boardOf(stage);
+    if (!rows.length) return null;
+    return sortBy === 'combo'
+      ? rows.reduce((m, e) => Math.max(m, e.combo || 0), 0) || null
+      : rows[0].score;
+  }
+
   function loadOnline(stage) {
     // 저장소를 읽기 전(reset() 이 loadBoard() 보다 먼저 돈다)에는 부르지 않는다.
     // 그때는 boards 도 playerId 도 비어 있어 순위와 내 기록 표시가 빠진 채로 캐시된다.
     if (!playerId) return;
-    const c = online[stage];
+    const ck = cacheKey(stage);
+    const c = online[ck];
     // 받아오는 중이거나 아직 신선하면 다시 부르지 않는다. 실패한 것도 잠시 쉬었다 재시도해야
     // 렌더 → 실패 → 렌더가 무한히 도는 것을 막는다.
     if (c && (c.state === 'loading' || Date.now() - c.at < FRESH_MS)) return;
-    online[stage] = { state: 'loading' };
-    const mine = boardOf(stage)[0];
-    Promise.all([fetchTop(stage), mine ? fetchRank(stage, mine.score).catch(() => null) : null])
-      .then(([rows, rank]) => { online[stage] = { state: 'ok', rows, rank, at: Date.now() }; })
-      .catch(() => { online[stage] = { state: 'error', at: Date.now() }; })
+    online[ck] = { state: 'loading' };
+    const mine = myBest(stage);
+    Promise.all([fetchTop(stage), mine != null ? fetchRank(stage, mine).catch(() => null) : null])
+      .then(([rows, rank]) => { online[ck] = { state: 'ok', rows, rank, at: Date.now() }; })
+      .catch(() => { online[ck] = { state: 'error', at: Date.now() }; })
       .then(() => { if (viewKey === stage && scope === 'all') renderBoard(); });
   }
 
   // 제출은 게임을 막지 않는다 — 실패해도 로컬 기록은 이미 저장돼 있다
-  function submitOnline(stage, name, score) {
+  function submitOnline(stage, name, score, combo) {
     fetch(API_URL, {
       method: 'POST',
       headers: { ...apiHeaders(), 'Content-Type': 'application/json', Prefer: 'return=minimal' },
-      body: JSON.stringify({ stage, name, score, player_id: playerId }),
+      body: JSON.stringify({ stage, name, score, combo, player_id: playerId }),
       signal: timeout(),
     }).then(r => {
       // fetch 는 400 같은 거부 응답에도 실패로 떨어지지 않는다. 직접 확인하지 않으면
       // 서버가 점수를 거부해도(예: 점수 상한 초과) 성공으로 보고 조용히 넘어간다.
       if (!r.ok) throw new Error('HTTP ' + r.status);
       submitErr = null;
-      delete online[stage];                    // 새 기록이 보이도록 캐시를 버리고
+      // 새 기록이 보이도록 이 단계의 캐시를 정렬별로 모두 버리고
+      Object.keys(online).forEach(k => { if (k.startsWith(stage + '|')) delete online[k]; });
       if (viewKey === stage && scope === 'all') renderBoard();   // 그 자리에서 다시 그린다
     }).catch(() => {
       submitErr = stage;                       // 올리지 못했다는 것을 화면에 알린다
@@ -604,9 +642,25 @@
     bestNameEl.textContent = (top && top.score >= mine) ? top.name : '';
   }
 
-  const row = (cls, rank, name, score) =>
+  // combo 는 나중에 생긴 칸이라 예전 기록에는 없다 — 그럴 땐 비워 둔다
+  const row = (cls, rank, name, score, combo) =>
     `<li class="${cls}"><span class="rank">${rank}</span>` +
-    `<span class="nm">${escapeHtml(name)}</span><span class="sc">${score}</span></li>`;
+    `<span class="nm">${escapeHtml(name)}</span>` +
+    `<span class="cb">${combo == null ? '' : combo}</span>` +
+    `<span class="sc">${score}</span></li>`;
+
+  // 열 이름이자 정렬 버튼 — 누르면 그 기준으로 순위를 다시 매긴다
+  const head = () =>
+    `<li class="head"><span class="rank"></span><span class="nm"></span>` +
+    `<button class="cb ${sortBy === 'combo' ? 'on' : ''}" data-sort="combo">콤보</button>` +
+    `<button class="sc ${sortBy === 'score' ? 'on' : ''}" data-sort="score">점수</button></li>`;
+
+  const localRows = stage => {
+    const rows = boardOf(stage).slice();
+    // 로컬 기록은 점수 기준으로 담아두지만, 보는 기준이 콤보면 그렇게 세워 보여준다
+    if (sortBy === 'combo') rows.sort((a, b) => (b.combo || 0) - (a.combo || 0) || b.score - a.score);
+    return rows;
+  };
 
   function renderBoard() {
     updateBestHUD();
@@ -622,26 +676,26 @@
         style="${d.key === viewKey ? `color:${d.color}` : ''}">${d.name}</button>`).join('');
 
     if (scope === 'me') {
-      const mine = boardOf(viewKey);
+      const mine = localRows(viewKey);
       boardList.innerHTML = mine.length
-        ? mine.map((e, i) => row(e.id === lastEntryId ? 'me' : '', i + 1, e.name, e.score)).join('')
+        ? head() + mine.map((e, i) => row(e.id === lastEntryId ? 'me' : '', i + 1, e.name, e.score, e.combo)).join('')
         : `<li class="empty">아직 기록이 없습니다</li>`;
       return;
     }
 
     loadOnline(viewKey);
-    const c = online[viewKey];
+    const c = online[cacheKey(viewKey)];
     if (!c || c.state === 'loading') {
       boardList.innerHTML = `<li class="empty">불러오는 중…</li>`;
       return;
     }
     if (c.state === 'error') {
       // 못 불러왔다고 빈 화면을 보여주지 않는다 — 내 기록으로 대신한다
-      const mine = boardOf(viewKey);
+      const mine = localRows(viewKey);
       boardList.innerHTML =
         `<li class="empty">전체 랭킹을 불러올 수 없어 내 기록을 보여줍니다</li>` +
         (mine.length
-          ? mine.map((e, i) => row(e.id === lastEntryId ? 'me' : '', i + 1, e.name, e.score)).join('')
+          ? head() + mine.map((e, i) => row(e.id === lastEntryId ? 'me' : '', i + 1, e.name, e.score, e.combo)).join('')
           : `<li class="empty">아직 기록이 없습니다</li>`);
       return;
     }
@@ -649,12 +703,12 @@
     let html = submitErr === viewKey
       ? `<li class="empty">방금 기록을 전체 랭킹에 올리지 못했습니다<br>내 기록에는 남아 있습니다</li>` : '';
     html += c.rows.length
-      ? c.rows.map((e, i) => row(e.player_id === playerId ? 'mine' : '', i + 1, e.name, e.score)).join('')
+      ? head() + c.rows.map((e, i) => row(e.player_id === playerId ? 'mine' : '', i + 1, e.name, e.score, e.combo)).join('')
       : `<li class="empty">아직 아무도 기록을 남기지 않았습니다</li>`;
     // 상위 목록에 내가 없으면 내 순위를 맨 아래에 고정한다
-    const best = boardOf(viewKey)[0];
+    const best = localRows(viewKey)[0];
     if (best && c.rank && !c.rows.some(e => e.player_id === playerId)) {
-      html += row('myrank', c.rank, '내 기록 · ' + best.name, best.score);
+      html += row('myrank', c.rank, '내 기록 · ' + best.name, best.score, best.combo);
     }
     boardList.innerHTML = html;
   }
@@ -665,6 +719,17 @@
     const btn = e.target.closest('button');
     if (!btn) return;
     scope = btn.dataset.s;
+    renderBoard();
+  });
+
+  boardList.addEventListener('pointerdown', e => {
+    if (e.target.closest('[data-sort]')) e.stopPropagation();
+  });
+  boardList.addEventListener('click', e => {
+    const btn = e.target.closest('[data-sort]');
+    if (!btn) return;
+    e.stopPropagation();
+    sortBy = btn.dataset.sort;
     renderBoard();
   });
 
@@ -968,7 +1033,7 @@
   const BASE_W = () => Math.min(W * 0.62, 340);
 
   let state, blocks, mover, debris, rings, cam, camTarget;
-  let score, combo, shake, hueBase, bgFlash;
+  let score, combo, maxCombo, shake, hueBase, bgFlash;
   const bests = {};                // 이번 세션의 단계별 최고 점수
   let tut = null;                  // 튜터리얼 진행 중이면 { step, easy }
   let paused = false;              // 블록과 파편의 움직임을 멈춘다 (튜터리얼 설명용)
@@ -982,7 +1047,7 @@
     blocks = [];
     debris = [];
     rings = [];
-    score = 0; combo = 0; shake = 0; bgFlash = 0;
+    score = 0; combo = 0; maxCombo = 0; shake = 0; bgFlash = 0;
     submitErr = null;
     cam = 0; camTarget = 0;
     scoreEl.textContent = '0';
@@ -1063,6 +1128,7 @@
     if (Math.abs(delta) <= tol) {
       perfect = true;
       combo++;
+      if (combo > maxCombo) maxCombo = combo;   // 이 판의 최고 콤보
       const newW = Math.min(top.w + D().recover, BASE_W());
       const added = newW - top.w;              // 폭 상한에 걸리면 0 이 된다
       // 블록이 가던 방향으로 늘린다. 늘 왼쪽 끝을 고정하고 늘리면(예전 방식) 오른쪽으로만
@@ -1136,9 +1202,9 @@
     memName = name;
     lastEntryId = Date.now() + '-' + Math.random().toString(36).slice(2, 6);
     viewKey = D().key;             // 방금 세운 기록이 있는 탭을 보여준다
-    boardOf(D().key).push({ id: lastEntryId, name, score });
+    boardOf(D().key).push({ id: lastEntryId, name, score, combo: maxCombo });
     await saveBoard();
-    submitOnline(D().key, name, score);
+    submitOnline(D().key, name, score, maxCombo);
     entryBox.classList.remove('show');
     state = 'over';
     ovMsg.textContent = '탭해서 다시 도전';
