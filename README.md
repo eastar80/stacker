@@ -97,8 +97,16 @@
 바꾸면 같은 사람의 다른 판이 올라온다. (두 판을 한 화면에 같이 세우면 같은 사람이 1위와
 5위에 겹쳐 나와 순위가 읽히지 않는다.) `내 기록` 탭은 내 판을 다 보여주므로 그대로다.
 
-**내 순위도 그 목록에서의 자리다.** 서버에 "나보다 높은 기록이 몇 개냐" 를 묻던 방식은
-중복을 세기 때문에 화면과 어긋났다. 지금은 상위 200줄을 받아 브라우저에서 추려 자리를 센다.
+추리는 일은 **서버의 뷰**가 한다(`best_by_score` / `best_by_combo`). 브라우저가 상위 몇 줄만
+받아 추리면 한 사람이 그 범위를 통째로 채웠을 때 목록이 무너진다 — 210판을 쌓은 플레이어
+하나로 TOP 10 이 한 줄이 되는 것을 확인했다. 뷰는 전체 기록을 보고 고르므로 그런 일이 없다.
+
+**내 순위도 그 뷰에서의 자리다.** 뷰는 한 사람에 한 줄뿐이라 "나보다 위에 있는 줄 수" 가
+곧 사람 수이고, 그게 화면 순위와 정확히 맞는다. 원본 테이블을 세면 같은 사람의 여러 판이
+겹쳐 세어져 어긋났다.
+
+> 뷰가 없으면(404) 예전처럼 상위 200줄을 받아 브라우저에서 추리는 쪽으로 자동으로 내려간다.
+> 랭킹을 통째로 못 보여주는 것보다는 낫기 때문이며, 어디까지나 임시 방편이다.
 
 **이름은 0점만 넘으면 언제나 적을 수 있다.** 예전에는 이 기기의 해당 단계 TOP 5 에 들어야
 입력창이 떴는데, 그 관문은 실력이 아니라 **그 기기의 플레이 이력**으로 높이가 정해졌다 —
@@ -115,6 +123,30 @@ HTML 에 그대로 들어가도 된다. 실제 방어는 서버의 RLS 정책과
 점수 상한, 이름 길이)이 한다.
 
 > 서버에 `combo` 칸(`int`, NULL 허용)이 있어야 한다. 없으면 기록 제출이 400 으로 거부된다.
+
+플레이어별 최고 기록은 **뷰**로 뽑는다. 테이블을 따로 두면 원본과 어긋날 수 있지만
+(트리거 누락·삭제·백필), 뷰는 `scores` 를 그때그때 계산하므로 어긋날 수가 없다.
+
+```sql
+-- 플레이어별 "점수 최고 판"
+create or replace view best_by_score with (security_invoker = true) as
+select distinct on (stage, player_id) stage, player_id, name, score, combo, created_at
+from scores
+order by stage, player_id, score desc, created_at asc;
+
+-- 플레이어별 "콤보 최고 판" (콤보가 없는 예전 기록만 가진 사람은 그 판이 올라온다)
+create or replace view best_by_combo with (security_invoker = true) as
+select distinct on (stage, player_id) stage, player_id, name, score, combo, created_at
+from scores
+order by stage, player_id, combo desc nulls last, created_at asc;
+
+grant select on best_by_score, best_by_combo to anon, authenticated;
+
+create index if not exists scores_best_score_idx on scores (stage, player_id, score desc, created_at);
+create index if not exists scores_best_combo_idx on scores (stage, player_id, combo desc nulls last, created_at);
+```
+
+`security_invoker` 는 뷰가 `scores` 의 RLS 정책을 그대로 따르게 한다(PostgreSQL 15 이상).
 
 플레이어는 `localStorage` 의 익명 ID(`stacker-player-id`)로 구분한다. 로그인은 없다.
 이 ID 로 플레이어별 최고 기록을 추려내므로, 브라우저 저장소를 지우면 다른 사람으로 센다.
