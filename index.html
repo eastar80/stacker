@@ -544,29 +544,37 @@
   // 응답이 없으면 마냥 "불러오는 중" 에 머무르지 않고 실패로 떨어뜨려 내 기록을 보여준다
   const timeout = () => (AbortSignal.timeout ? AbortSignal.timeout(6000) : undefined);
 
+  // 정렬 규칙이 두 개다. 섞으면 안 된다.
+  //  · 이름 안에서 어느 판을 대표로 세울지 → 동점은 다른 값으로 가른다 (콤보 같으면 점수).
+  //  · 이름끼리 순위를 매길 때        → 동점은 "그 값을 먼저 낸 쪽" 이 위.
+  // 뒤엣것에 대표 판의 시각(created_at)을 쓰면 안 된다. 같은 값을 더 좋은 점수로 다시
+  // 낸 사람은 대표 판이 최근이라 먼저 낸 사람보다 뒤로 밀린다. 그래서 뷰가 따로 계산해
+  // 주는 reached_at("이 이름이 이 값을 처음 낸 때")으로 가른다.
+  const rankOrder = () => sortBy === 'combo'
+    ? 'combo.desc.nullslast,reached_at.asc'
+    : 'score.desc,reached_at.asc';
+  // 대비책에서 원본을 받을 때 — 이름마다 처음 나오는 줄이 대표가 되도록 세운다.
+  // combo 는 나중에 생긴 칸이라 예전 기록은 NULL 이다. 내림차순에서 앞으로 오지 않도록
+  // nullslast 를 준다. select=* 라 combo 칸이 없는 서버에서도 조회는 깨지지 않는다.
+  const pickOrder = () => sortBy === 'combo'
+    ? 'combo.desc.nullslast,score.desc,created_at.asc'
+    : 'score.desc,combo.desc.nullslast,created_at.asc';
+
   async function fetchTop(stage) {
-    // select=* 로 받는다. combo 컬럼을 아직 만들지 않은 서버에서도 질의가 깨지지 않는다.
-    // combo 는 나중에 생긴 칸이라 예전 기록은 NULL 이다 — 내림차순에서 NULL 이 앞에
-    // 오지 않도록 nullslast 를 준다.
-    // 동점은 다른 값으로 가른다 — 콤보가 같으면 점수가 높은 판, 점수가 같으면 콤보가
-    // 높은 판이 그 이름의 대표가 된다. created_at 은 그래도 갈리지 않을 때만 본다.
-    const order = sortBy === 'combo'
-      ? 'combo.desc.nullslast,score.desc,created_at.asc'
-      : 'score.desc,combo.desc.nullslast,created_at.asc';
     if (useView) {
       // 한 줄 더 받는다 — 내가 11등이면 순위를 따로 물어보지 않아도 된다
-      const r = await fetch(`${VIEW()}?stage=eq.${stage}&select=*&order=${order}&limit=${TOP_N + 1}`,
+      const r = await fetch(`${VIEW()}?stage=eq.${stage}&select=*&order=${rankOrder()}&limit=${TOP_N + 1}`,
         { headers: apiHeaders(), signal: timeout() });
       // 뷰를 아직 안 만들었으면 404 다. 랭킹을 통째로 못 보여주느니 대비책으로 내려간다.
       if (r.status === 404) useView = false;
       else if (!r.ok) throw new Error('HTTP ' + r.status);
       else return { rows: await r.json(), exact: true };
     }
-    const r = await fetch(`${API_URL}?stage=eq.${stage}&select=*&order=${order}&limit=${WINDOW}`,
+    const r = await fetch(`${API_URL}?stage=eq.${stage}&select=*&order=${pickOrder()}&limit=${WINDOW}`,
       { headers: apiHeaders(), signal: timeout() });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const raw = await r.json();
-    return { rows: bestPerName(raw), exact: raw.length < WINDOW };
+    return { rows: byRank(bestPerName(raw)), exact: raw.length < WINDOW };
   }
 
   // 뷰에서 나보다 위에 있는 "사람" 수를 세어 순위를 낸다 (Content-Range: "0-0/123").
@@ -602,14 +610,31 @@
   // 순위는 이름으로 센다. 기기(player_id)로 세면 같은 사람이 폰과 PC 로 두 줄을 차지한다.
   // 어느 줄을 남길지는 보고 있는 기준을 따른다 — 점수순이면 점수 최고 판, 콤보순이면
   // 콤보 최고 판. 서버가 이미 그 기준으로 세워 보내므로 처음 나오는 줄이 곧 최고 기록이다.
+  // rows 는 pickOrder 로 세워져 있으므로 이름마다 처음 나오는 줄이 대표다.
+  // 뷰가 해주는 reached_at 계산을 여기서 대신한다 — 두 경로가 같은 순서를 내야 한다.
+  const sortVal = e => sortBy === 'combo' ? (e.combo == null ? null : e.combo) : e.score;
   function bestPerName(rows) {
+    const firstAt = new Map();                 // 이름|값 → 그 값을 처음 낸 때
+    for (const e of rows) {
+      const k = nameKey(e.name) + '\u0000' + sortVal(e);
+      const t = Date.parse(e.created_at) || 0;
+      if (!firstAt.has(k) || t < firstAt.get(k)) firstAt.set(k, t);
+    }
     const seen = new Set();
-    return rows.filter(e => {
+    const out = [];
+    for (const e of rows) {
       const k = nameKey(e.name);
-      if (seen.has(k)) return false;
+      if (seen.has(k)) continue;
       seen.add(k);
-      return true;
-    });
+      out.push({ ...e, _reached: firstAt.get(k + '\u0000' + sortVal(e)) });
+    }
+    return out;
+  }
+
+  // 이름끼리의 규칙으로 다시 세운다. 뷰 경로는 서버가 이미 이 순서로 보내준다.
+  function byRank(rows) {
+    const v = e => { const x = sortVal(e); return x == null ? -Infinity : x; };
+    return rows.slice().sort((a, b) => (v(b) - v(a)) || ((a._reached || 0) - (b._reached || 0)));
   }
 
   function loadOnline(stage) {

@@ -122,9 +122,23 @@
 곧 사람 수이고, 그게 화면 순위와 정확히 맞는다. 원본 테이블을 세면 같은 사람의 여러 판이
 겹쳐 세어져 어긋났다.
 
-**동점은 다른 값으로 가른다.** 콤보가 같으면 점수가 높은 판이, 점수가 같으면 콤보가 높은
-판이 그 이름의 대표가 된다. `created_at` 은 그래도 갈리지 않을 때만 본다 — 먼저 올린 판을
-우선하면 나중에 더 잘한 판이 묻힌다.
+**동점 규칙은 두 개이고 섞으면 안 된다.**
+
+- **이름 안**에서 대표 판을 고를 때 — 콤보가 같으면 점수가 높은 판, 점수가 같으면 콤보가
+  높은 판. 먼저 올린 판을 우선하면 나중에 더 잘한 판이 묻힌다.
+- **이름끼리** 순위를 매길 때 — **그 값을 먼저 낸 쪽**이 위다.
+
+뒤엣것에 대표 판의 `created_at` 을 쓰면 안 된다. 예를 들어
+
+```
+t1  태연  콤보 8  점수 161
+t2  동규  콤보 8  점수 200
+t3  태연  콤보 8  점수 250
+```
+
+태연의 대표는 `t3` 짜리(250)가 되는데, 그 시각으로 비교하면 `t2` 인 동규가 위로 간다.
+콤보 8 을 먼저 찍은 것은 태연(`t1`)인데도 그렇다. 그래서 뷰가 `reached_at`
+(= 그 이름이 그 값을 처음 낸 때)을 따로 계산해 주고, 순위는 그 값으로 가른다.
 
 > 뷰가 없으면(404) 예전처럼 상위 200줄을 받아 브라우저에서 추리는 쪽으로 자동으로 내려간다.
 > 랭킹을 통째로 못 보여주는 것보다는 낫기 때문이며, 어디까지나 임시 방편이다.
@@ -153,18 +167,32 @@ HTML 에 그대로 들어가도 된다. 실제 방어는 서버의 RLS 정책과
 drop view if exists best_by_score;
 drop view if exists best_by_combo;
 
--- 이름별 "점수 최고 판" (대소문자 무시). 점수가 같으면 콤보가 높은 판이 대표가 된다.
+-- 이름별 "점수 최고 판" (대소문자 무시).
+--   대표    : 점수가 같으면 콤보가 높은 판
+--   reached_at : 그 이름이 그 점수를 처음 낸 때 — 이름끼리의 동점을 가르는 값이다.
+--                대표 판의 created_at 을 쓰면, 같은 점수를 더 좋은 콤보로 다시 낸 사람이
+--                먼저 낸 사람보다 뒤로 밀린다.
 create view best_by_score with (security_invoker = true) as
-select distinct on (stage, lower(name)) stage, name, player_id, score, combo, created_at
-from scores
-order by stage, lower(name), score desc, combo desc nulls last, created_at asc;
+select distinct on (stage, name_key)
+       stage, name, player_id, score, combo, created_at, reached_at
+from (
+  select stage, name, lower(name) as name_key, player_id, score, combo, created_at,
+         min(created_at) over (partition by stage, lower(name), score) as reached_at
+  from scores
+) s
+order by stage, name_key, score desc, combo desc nulls last, created_at asc;
 
 -- 이름별 "콤보 최고 판". 콤보가 같으면 점수가 높은 판이 대표가 된다.
 -- (콤보가 없는 예전 기록만 가진 이름은 그 판이 올라온다)
 create view best_by_combo with (security_invoker = true) as
-select distinct on (stage, lower(name)) stage, name, player_id, score, combo, created_at
-from scores
-order by stage, lower(name), combo desc nulls last, score desc, created_at asc;
+select distinct on (stage, name_key)
+       stage, name, player_id, score, combo, created_at, reached_at
+from (
+  select stage, name, lower(name) as name_key, player_id, score, combo, created_at,
+         min(created_at) over (partition by stage, lower(name), combo) as reached_at
+  from scores
+) s
+order by stage, name_key, combo desc nulls last, score desc, created_at asc;
 
 -- 어떤 이름을 어떤 기기가 쓰고 있는지 (겹침 안내용). 단계와 무관하다.
 create or replace view name_owners with (security_invoker = true) as
