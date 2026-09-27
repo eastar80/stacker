@@ -144,10 +144,16 @@
     font-family: inherit;
   }
   #entryBox input:focus { border-color: #ffe27a; }
+  #entryBox .btns { display: flex; align-items: center; gap: 10px; }
   #entryBox button {
-    padding: 12px 34px; border-radius: 999px; border: none;
+    padding: 12px 24px; border-radius: 999px; border: none;
     background: #ffe27a; color: #1a1405; font-size: 16px; font-weight: 700;
     cursor: pointer; font-family: inherit;
+  }
+  /* #entryBox button 보다 뒤이면서 같은 무게라야 배경색을 덮는다 */
+  #entryBox #skipBtn {
+    padding: 12px 18px; background: transparent; color: rgba(238,241,248,.55);
+    border: 2px solid rgba(238,241,248,.18); font-weight: 600;
   }
   #entryBox button:active { transform: scale(.96); }
 
@@ -365,7 +371,10 @@
     <button id="tutBtn">처음이신가요? 튜터리얼 →</button>
     <div id="entryBox">
       <input id="nameInput" maxlength="12" placeholder="이름을 입력하세요" autocomplete="off">
-      <button id="saveBtn">기록 저장</button>
+      <div class="btns">
+        <button id="saveBtn">기록 저장</button>
+        <button id="skipBtn">건너뛰기</button>
+      </div>
     </div>
     <div id="board" style="display:none">
       <div id="scopeTabs"></div>
@@ -391,6 +400,7 @@
   const entryBox = document.getElementById('entryBox');
   const nameInput = document.getElementById('nameInput');
   const saveBtn = document.getElementById('saveBtn');
+  const skipBtn = document.getElementById('skipBtn');
   const boardEl = document.getElementById('board');
   const boardList = document.getElementById('boardList');
   const muteBtn = document.getElementById('muteBtn');
@@ -619,9 +629,14 @@
     await store.set(NAME_KEY, memName);
   }
 
-  // TOP 5 진입 여부는 지금 플레이한 단계 안에서만 따진다.
-  function qualifies(s) {
-    if (s <= 0) return false;
+  // 이름은 점수를 냈으면 언제나 적을 수 있다. 예전에는 이 기기의 TOP 5 에 들어야만
+  // 적을 수 있었는데, 그 관문은 "내 기기의 플레이 이력" 으로 높이가 정해져서
+  // 처음 다섯 판은 몇 점이든 통과하고 많이 해본 사람은 좋은 기록도 막혔다.
+  // 전체 랭킹이 생긴 뒤로는 판정 기준(로컬)과 저장 목적지(전체)가 어긋난 셈이었다.
+  const canEnterName = s => s > 0;
+
+  // TOP 5 진입 여부는 이제 축하 문구에만 쓴다. 지금 플레이한 단계 안에서만 따진다.
+  function isTop5(s) {
     const b = boardOf(D().key);
     if (b.length < 5) return true;
     return s > b[b.length - 1].score;
@@ -1183,9 +1198,11 @@
     musicPick.classList.remove('show');
     tutBtn.classList.remove('show');
 
-    if (qualifies(score)) {
+    if (canEnterName(score)) {
       state = 'entry';
-      ovMsg.innerHTML = `<span class="newbest">🏆 TOP 5 진입!</span> 이름을 남겨주세요`;
+      ovMsg.innerHTML = isTop5(score)
+        ? `<span class="newbest">🏆 TOP 5 진입!</span> 이름을 남겨주세요`
+        : '이름을 남겨주세요';
       entryBox.classList.add('show');
       nameInput.value = memName || '';
       setTimeout(() => nameInput.focus(), 50);
@@ -1194,6 +1211,15 @@
       ovMsg.textContent = '탭해서 다시 도전';
     }
     renderBoard();
+  }
+
+  // 매 판 이름을 묻게 됐으니 빠져나갈 길이 있어야 한다.
+  // 건너뛴 기록은 로컬에도 전체 랭킹에도 남기지 않는다.
+  function skipEntry() {
+    if (state !== 'entry') return;
+    entryBox.classList.remove('show');
+    state = 'over';
+    ovMsg.textContent = '탭해서 다시 도전';
   }
 
   async function submitName() {
@@ -1389,9 +1415,11 @@
 
   entryBox.addEventListener('pointerdown', e => e.stopPropagation());
   saveBtn.addEventListener('click', submitName);
+  skipBtn.addEventListener('click', skipEntry);
   nameInput.addEventListener('keydown', e => {
     e.stopPropagation();
     if (e.code === 'Enter') submitName();
+    if (e.code === 'Escape') skipEntry();
   });
 
   // ============ 입력 ============
