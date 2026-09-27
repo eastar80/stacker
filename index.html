@@ -829,7 +829,14 @@
     boardList.innerHTML = listHtml;
     boardMine.innerHTML = mineHtml;
     const items = [...boardList.querySelectorAll('li:not(.head):not(.empty)')];
-    for (let i = items.length - 1; i >= MIN_ROWS && !boardFits(); i--) items[i].style.display = 'none';
+    let left = items.length;
+    for (let i = items.length - 1; i >= 0 && left > MIN_ROWS && !boardFits(); i--) {
+      // 내 줄은 남긴다. 목록 안에 있다는 이유로 고정 줄을 생략했는데 그 줄이 잘려나가면
+      // 내 기록이 화면에서 통째로 사라진다 — 8위인데 7줄만 들어가는 경우가 그랬다.
+      if (items[i].classList.contains('mine')) continue;
+      items[i].style.display = 'none';
+      left--;
+    }
   }
   function boardFits() {
     return ovTitle.getBoundingClientRect().top >= 4 &&
