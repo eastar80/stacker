@@ -159,6 +159,26 @@
   }
   #entryBox button:active { transform: scale(.96); }
 
+  /* 같은 이름을 다른 기기에서 쓰고 있을 때의 안내. 입력창 자리를 대신 차지한다. */
+  #nameWarn {
+    display: none; flex-direction: column; align-items: center; gap: 12px;
+    pointer-events: auto; max-width: 320px;
+  }
+  #nameWarn.show { display: flex; }
+  #nameWarn .msg { font-size: 15px; line-height: 1.5; color: rgba(238,241,248,.8); }
+  #nameWarn .msg b { color: #ffe27a; }
+  #nameWarn .btns { display: flex; align-items: center; gap: 10px; }
+  #nameWarn button {
+    padding: 11px 20px; border-radius: 999px; border: none;
+    background: #ffe27a; color: #1a1405; font-size: 15px; font-weight: 700;
+    cursor: pointer; font-family: inherit;
+  }
+  #nameWarn #warnRename {
+    background: transparent; color: rgba(238,241,248,.55);
+    border: 2px solid rgba(238,241,248,.18); font-weight: 600;
+  }
+  #nameWarn button:active { transform: scale(.96); }
+
   #hudLeft { display: flex; flex-direction: column; gap: 9px; }
 
   #diffBadge {
@@ -233,8 +253,11 @@
   #boardMine:empty { display: none; }
 
   /* 주소창·하단바가 보이는 휴대폰은 세로가 크게 모자란다. 글자와 여백을 줄여
-     순위를 한 줄이라도 더 남긴다 — 모자라면 fitBoard() 가 아래에서부터 덜어낸다. */
-  @media (max-height: 700px) {
+     순위를 한 줄이라도 더 남긴다 — 모자라면 fitBoard() 가 아래에서부터 덜어낸다.
+     기준선 760px 은 재어서 정했다: 원래 크기로 시작 화면(난이도 선택까지 보이는 가장
+     높은 화면)이 TOP 10 을 담는 한계가 760px 이다. 더 높게 잡으면 필요 없는데도 글자가
+     작아지고, 더 낮게 잡으면 730px 짜리 폰에서 8줄로 잘린다. */
+  @media (max-height: 760px) {
     #overlay { gap: 10px; padding: 12px; }
     #overlay .final { font-size: 54px; }
     #overlay h1 { font-size: 34px; }
@@ -245,6 +268,9 @@
     #entryBox input { padding: 10px 16px; }
     #entryBox button { padding: 10px 22px; }
     #entryBox #skipBtn { padding: 10px 16px; }
+    #nameWarn { gap: 9px; }
+    #nameWarn .msg { font-size: 14px; }
+    #nameWarn button { padding: 9px 16px; }
   }
   /* 가로로 눕혔거나 아주 작은 기기 — 큰 점수 글자를 더 줄여 목록 자리를 만든다 */
   @media (max-height: 520px) {
@@ -402,6 +428,13 @@
         <button id="skipBtn">건너뛰기</button>
       </div>
     </div>
+    <div id="nameWarn">
+      <p class="msg"></p>
+      <div class="btns">
+        <button id="warnKeep">그대로 쓰기</button>
+        <button id="warnRename">다른 이름 쓰기</button>
+      </div>
+    </div>
     <div id="board" style="display:none">
       <div id="scopeTabs"></div>
       <div id="boardTabs"></div>
@@ -428,6 +461,10 @@
   const nameInput = document.getElementById('nameInput');
   const saveBtn = document.getElementById('saveBtn');
   const skipBtn = document.getElementById('skipBtn');
+  const nameWarn = document.getElementById('nameWarn');
+  const warnMsg = nameWarn.querySelector('.msg');
+  const warnKeep = document.getElementById('warnKeep');
+  const warnRename = document.getElementById('warnRename');
   const boardEl = document.getElementById('board');
   const boardList = document.getElementById('boardList');
   const muteBtn = document.getElementById('muteBtn');
@@ -483,6 +520,7 @@
   const VIEW = () => API_BASE + (sortBy === 'combo' ? '/best_by_combo' : '/best_by_score');
   const API_KEY = 'sb_publishable_J7xd_-AgszYcyFJaX5qpKg_Nx-YDPzQ';
   const PLAYER_KEY = 'stacker-player-id';
+  const ANON = '익명';             // 여러 사람이 함께 쓰는 기본 이름 — 겹침을 묻지 않는다
   const TOP_N = 10;
   // 뷰가 없는 서버를 위한 대비책. 상위 WINDOW 줄을 받아 브라우저에서 추린다 —
   // 한 사람이 이 창을 통째로 채우면 목록이 짧아지므로 어디까지나 임시 방편이다.
@@ -521,7 +559,7 @@
       { headers: apiHeaders(), signal: timeout() });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const raw = await r.json();
-    return { rows: bestPerPlayer(raw), exact: raw.length < WINDOW };
+    return { rows: bestPerName(raw), exact: raw.length < WINDOW };
   }
 
   // 뷰에서 나보다 위에 있는 "사람" 수를 세어 순위를 낸다 (Content-Range: "0-0/123").
@@ -535,26 +573,34 @@
     return Number.isFinite(total) ? total + 1 : null;
   }
 
-  // 내 최고값 — 보고 있는 기준에 맞춰 로컬 기록에서 고른다
-  function myBest(stage) {
-    const rows = boardOf(stage);
+  const nameKey = n => (n || '').trim().toLowerCase();   // Jw = JW = jw
+  // 순위가 이름 기준이므로, 내 기록도 "지금 쓰는 이름으로 이 기기에 남은 것" 에서 고른다.
+  // 이름을 바꿔가며 쓴 기록까지 섞으면 엉뚱한 이름의 점수로 순위를 묻게 된다.
+  function myLocalRow(stage) {
+    const k = nameKey(memName);
+    if (!k) return null;
+    const rows = boardOf(stage).filter(e => nameKey(e.name) === k);
     if (!rows.length) return null;
-    return sortBy === 'combo'
-      ? rows.reduce((m, e) => Math.max(m, e.combo || 0), 0) || null
-      : rows[0].score;
+    return rows.slice().sort((a, b) => sortBy === 'combo'
+      ? (b.combo || 0) - (a.combo || 0) || b.score - a.score
+      : b.score - a.score)[0];
   }
+  function myBest(stage) {
+    const r = myLocalRow(stage);
+    if (!r) return null;
+    return sortBy === 'combo' ? (r.combo == null ? null : r.combo) : r.score;
+  }
+  const isMine = e => !!nameKey(memName) && nameKey(e.name) === nameKey(memName);
 
-  // 한 사람이 목록을 도배하지 않도록 플레이어마다 한 줄만 남긴다. 어느 줄을 남길지는
-  // 보고 있는 기준을 따른다 — 점수순이면 그 사람의 점수 최고 판, 콤보순이면 콤보 최고 판.
-  // (두 기록을 한 화면에 같이 세우면 같은 사람이 1위와 5위에 겹쳐 나와 순위가 헷갈린다.)
-  // 서버가 이미 그 기준으로 세워 보내므로 처음 나오는 줄이 곧 그 사람의 최고 기록이다.
-  function bestPerPlayer(rows) {
+  // 순위는 이름으로 센다. 기기(player_id)로 세면 같은 사람이 폰과 PC 로 두 줄을 차지한다.
+  // 어느 줄을 남길지는 보고 있는 기준을 따른다 — 점수순이면 점수 최고 판, 콤보순이면
+  // 콤보 최고 판. 서버가 이미 그 기준으로 세워 보내므로 처음 나오는 줄이 곧 최고 기록이다.
+  function bestPerName(rows) {
     const seen = new Set();
     return rows.filter(e => {
-      // player_id 가 없던 시절의 기록은 묶을 근거가 없으니 각각 남긴다
-      if (!e.player_id) return true;
-      if (seen.has(e.player_id)) return false;
-      seen.add(e.player_id);
+      const k = nameKey(e.name);
+      if (seen.has(k)) return false;
+      seen.add(k);
       return true;
     });
   }
@@ -572,7 +618,7 @@
     fetchTop(stage)
       .then(async ({ rows: ranked, exact }) => {
         // 순위는 화면에 보이는 것과 같은 목록(플레이어별 최고 기록)에서의 자리다.
-        const i = ranked.findIndex(e => e.player_id === playerId);
+        const i = ranked.findIndex(isMine);
         const c = { state: 'ok', rows: ranked.slice(0, TOP_N),
                     myRank: i >= 0 ? i + 1 : null, myRow: i >= 0 ? ranked[i] : null,
                     below: null, at: Date.now() };
@@ -594,6 +640,20 @@
       })
       .catch(() => { online[ck] = { state: 'error', at: Date.now() }; })
       .then(() => { if (viewKey === stage && scope === 'all') renderBoard(); });
+  }
+
+  // 이 이름을 다른 기기에서 쓰고 있는지 본다. 이 기기에서 쓴 적이 있으면 본인이므로 묻지 않는다.
+  // name_owners 뷰는 (소문자 이름, player_id) 쌍만 담아 대소문자 문제를 서버에서 끝낸다.
+  async function nameUsedByOther(name) {
+    const key = encodeURIComponent(nameKey(name));
+    const ask = async extra => {
+      const r = await fetch(`${API_BASE}/name_owners?name_key=eq.${key}${extra}&select=player_id&limit=1`,
+        { headers: apiHeaders(), signal: timeout() });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return (await r.json()).length > 0;
+    };
+    if (await ask(`&player_id=eq.${encodeURIComponent(playerId)}`)) return false;   // 내가 쓰던 이름
+    return ask('');
   }
 
   // 제출은 게임을 막지 않는다 — 실패해도 로컬 기록은 이미 저장돼 있다
@@ -799,7 +859,7 @@
     let html = submitErr === viewKey
       ? `<li class="empty">방금 기록을 전체 랭킹에 올리지 못했습니다<br>내 기록에는 남아 있습니다</li>` : '';
     html += c.rows.length
-      ? head() + c.rows.map((e, i) => row(e.player_id === playerId ? 'mine' : '', i + 1, e.name, e.score, e.combo)).join('')
+      ? head() + c.rows.map((e, i) => row(isMine(e) ? 'mine' : '', i + 1, e.name, e.score, e.combo)).join('')
       : `<li class="empty">아직 아무도 기록을 남기지 않았습니다</li>`;
     setBoard(html, pinnedMine(c));
   }
@@ -811,7 +871,7 @@
     // 기록이 없는데(제출 실패·건너뛰기) 로컬 기록으로 순위만 나온 경우 고정 줄이 사라진다.
     if (c.myRow && c.myRank <= TOP_N) return '';
     if (c.myRow) return row('myrank', c.myRank, '내 기록 · ' + c.myRow.name, c.myRow.score, c.myRow.combo);
-    const best = localRows(viewKey)[0];
+    const best = myLocalRow(viewKey) || localRows(viewKey)[0];
     if (!best) return '';
     // 자리를 못 센 경우(대비책 + 창이 꽉 참)에는 "이만큼 아래" 라고만 알린다
     const rank = c.myRank || (c.below ? c.below + '+' : '');
@@ -826,7 +886,14 @@
     boardList.innerHTML = listHtml;
     boardMine.innerHTML = mineHtml;
     const items = [...boardList.querySelectorAll('li:not(.head):not(.empty)')];
-    for (let i = items.length - 1; i >= MIN_ROWS && !boardFits(); i--) items[i].style.display = 'none';
+    let left = items.length;
+    for (let i = items.length - 1; i >= 0 && left > MIN_ROWS && !boardFits(); i--) {
+      // 내 줄은 남긴다. 목록 안에 있다는 이유로 고정 줄을 생략했는데 그 줄이 잘려나가면
+      // 내 기록이 화면에서 통째로 사라진다 — 8위인데 7줄만 들어가는 경우가 그랬다.
+      if (items[i].classList.contains('mine')) continue;
+      items[i].style.display = 'none';
+      left--;
+    }
   }
   function boardFits() {
     return ovTitle.getBoundingClientRect().top >= 4 &&
@@ -1181,6 +1248,7 @@
     ovTag.style.display = 'block';
     ovTag.textContent = '딱 맞게 쌓으면 콤보!';
     entryBox.classList.remove('show');
+    nameWarn.classList.remove('show');
     viewKey = D().key;
     diffPick.classList.add('show');
     musicPick.classList.add('show');
@@ -1323,13 +1391,37 @@
   function skipEntry() {
     if (state !== 'entry') return;
     entryBox.classList.remove('show');
+    nameWarn.classList.remove('show');
     state = 'over';
     ovMsg.textContent = '탭해서 다시 도전';
   }
 
+  let checkingName = false;
+  let pendingName = '';
+
   async function submitName() {
+    if (state !== 'entry' || checkingName) return;
+    const name = (nameInput.value.trim() || ANON).slice(0, 12);
+    // 조회가 안 되면 묻지 않고 저장한다 — 네트워크 때문에 기록을 못 남기면 안 된다.
+    // 기본 이름은 여러 사람이 함께 쓰는 값이라 물어봐야 소용이 없다.
+    checkingName = true;
+    const taken = name === ANON ? false : await nameUsedByOther(name).catch(() => false);
+    checkingName = false;
+    if (state !== 'entry') return;               // 기다리는 사이 건너뛰었다면 그만둔다
+    if (taken) {
+      pendingName = name;
+      entryBox.classList.remove('show');
+      warnMsg.innerHTML = `"<b>${escapeHtml(name)}</b>" 는 이미 다른 기기에서 쓰고 있어요.<br>내 다른 기기인가요?`;
+      nameWarn.classList.add('show');
+      return;
+    }
+    saveEntry(name);
+  }
+
+  async function saveEntry(name) {
     if (state !== 'entry') return;
-    const name = (nameInput.value.trim() || '익명').slice(0, 12);
+    // 이름이 바뀌면 다른 단계의 "내 순위" 도 옛 이름으로 계산돼 있다 — 전부 버린다
+    if (nameKey(name) !== nameKey(memName)) Object.keys(online).forEach(k => delete online[k]);
     memName = name;
     lastEntryId = Date.now() + '-' + Math.random().toString(36).slice(2, 6);
     viewKey = D().key;             // 방금 세운 기록이 있는 탭을 보여준다
@@ -1337,6 +1429,7 @@
     await saveBoard();
     submitOnline(D().key, name, score, maxCombo);
     entryBox.classList.remove('show');
+    nameWarn.classList.remove('show');
     state = 'over';
     ovMsg.textContent = '탭해서 다시 도전';
     renderBoard();
@@ -1521,6 +1614,13 @@
   entryBox.addEventListener('pointerdown', e => e.stopPropagation());
   saveBtn.addEventListener('click', submitName);
   skipBtn.addEventListener('click', skipEntry);
+  nameWarn.addEventListener('pointerdown', e => e.stopPropagation());
+  warnKeep.addEventListener('click', () => { nameWarn.classList.remove('show'); saveEntry(pendingName); });
+  warnRename.addEventListener('click', () => {
+    nameWarn.classList.remove('show');
+    entryBox.classList.add('show');
+    nameInput.focus(); nameInput.select();     // 한 번 치면 바로 덮어쓰이게
+  });
   nameInput.addEventListener('keydown', e => {
     e.stopPropagation();
     if (e.code === 'Enter') submitName();
