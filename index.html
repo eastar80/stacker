@@ -127,6 +127,8 @@
   #board li.head button.on { color: #eef1f8; }
   #board li.head button:active { transform: scale(.94); }
   #board li .rank { color: rgba(238,241,248,.45); width: 18px; font-variant-numeric: tabular-nums; }
+  /* 받아온 창 밖이면 "63+" 처럼 세 글자가 된다 — 18px 에 갇히면 이름과 겹친다 */
+  #board li.myrank .rank { width: auto; min-width: 18px; padding-right: 2px; }
   #board li .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #board li .sc { width: 48px; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
   #board li.me { color: #ffe27a; }
@@ -144,10 +146,16 @@
     font-family: inherit;
   }
   #entryBox input:focus { border-color: #ffe27a; }
+  #entryBox .btns { display: flex; align-items: center; gap: 10px; }
   #entryBox button {
-    padding: 12px 34px; border-radius: 999px; border: none;
+    padding: 12px 24px; border-radius: 999px; border: none;
     background: #ffe27a; color: #1a1405; font-size: 16px; font-weight: 700;
     cursor: pointer; font-family: inherit;
+  }
+  /* #entryBox button 보다 뒤이면서 같은 무게라야 배경색을 덮는다 */
+  #entryBox #skipBtn {
+    padding: 12px 18px; background: transparent; color: rgba(238,241,248,.55);
+    border: 2px solid rgba(238,241,248,.18); font-weight: 600;
   }
   #entryBox button:active { transform: scale(.96); }
 
@@ -221,6 +229,30 @@
   #board li.empty {
     display: block; text-align: center;
     color: rgba(238,241,248,.4); padding: 10px 0;
+  }
+  #boardMine:empty { display: none; }
+
+  /* 주소창·하단바가 보이는 휴대폰은 세로가 크게 모자란다. 글자와 여백을 줄여
+     순위를 한 줄이라도 더 남긴다 — 모자라면 fitBoard() 가 아래에서부터 덜어낸다. */
+  @media (max-height: 700px) {
+    #overlay { gap: 10px; padding: 12px; }
+    #overlay .final { font-size: 54px; }
+    #overlay h1 { font-size: 34px; }
+    #board { padding: 12px 16px; }
+    #board li { padding: 3px 0; }
+    #scopeTabs, #boardTabs { margin-bottom: 7px; }
+    #entryBox { gap: 9px; }
+    #entryBox input { padding: 10px 16px; }
+    #entryBox button { padding: 10px 22px; }
+    #entryBox #skipBtn { padding: 10px 16px; }
+  }
+  /* 가로로 눕혔거나 아주 작은 기기 — 큰 점수 글자를 더 줄여 목록 자리를 만든다 */
+  @media (max-height: 520px) {
+    #overlay { gap: 7px; padding: 8px; }
+    #overlay .final { font-size: 38px; }
+    #overlay h1 { font-size: 26px; }
+    #overlay p { font-size: 14px; }
+    #board { padding: 9px 14px; }
   }
 
   /* 플레이 중에도 바꿀 수 있도록 음소거 버튼 아래에 둔다. 화면이 좁으니 이름 대신
@@ -365,12 +397,16 @@
     <button id="tutBtn">처음이신가요? 튜터리얼 →</button>
     <div id="entryBox">
       <input id="nameInput" maxlength="12" placeholder="이름을 입력하세요" autocomplete="off">
-      <button id="saveBtn">기록 저장</button>
+      <div class="btns">
+        <button id="saveBtn">기록 저장</button>
+        <button id="skipBtn">건너뛰기</button>
+      </div>
     </div>
     <div id="board" style="display:none">
       <div id="scopeTabs"></div>
       <div id="boardTabs"></div>
       <ol id="boardList"></ol>
+      <ol id="boardMine"></ol>
     </div>
   </div>
 </div>
@@ -391,6 +427,7 @@
   const entryBox = document.getElementById('entryBox');
   const nameInput = document.getElementById('nameInput');
   const saveBtn = document.getElementById('saveBtn');
+  const skipBtn = document.getElementById('skipBtn');
   const boardEl = document.getElementById('board');
   const boardList = document.getElementById('boardList');
   const muteBtn = document.getElementById('muteBtn');
@@ -398,6 +435,7 @@
   const diffPick = document.getElementById('diffPick');
   const nextPtsEl = document.getElementById('nextPts');
   const boardTabs = document.getElementById('boardTabs');
+  const boardMine = document.getElementById('boardMine');
   const scopeTabs = document.getElementById('scopeTabs');
   const musicPick = document.getElementById('musicPick');
   const musicBtns = document.getElementById('musicBtns');
@@ -417,7 +455,7 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
   resize();
-  addEventListener('resize', resize);
+  addEventListener('resize', () => { resize(); if (boardEl.style.display !== 'none') renderBoard(); });
 
   // ============ 난이도 ============
   // base/gain/cap = 블록 속도(층마다 gain씩 빨라지고 cap까지), tol = PERFECT 판정 px,
@@ -438,10 +476,18 @@
   // 아래 키는 공개용(publishable)이라 HTML 에 그대로 들어가도 된다. 실제 방어는 서버의
   // RLS 정책과 CHECK 제약(단계 이름, 점수 상한, 이름 길이)이 한다.
   // 네트워크가 어떤 이유로 막히든 게임과 로컬 기록은 그대로 돌아가야 한다.
-  const API_URL = 'https://czefdonwmxldnxefsubh.supabase.co/rest/v1/scores';
+  const API_BASE = 'https://czefdonwmxldnxefsubh.supabase.co/rest/v1';
+  const API_URL = API_BASE + '/scores';          // 제출은 원본 테이블로 간다
+  // 조회는 뷰로 간다. 뷰가 서버에서 전체 기록을 보고 플레이어마다 한 줄만 남겨주므로,
+  // 브라우저가 상위 몇 줄을 받아 추리는 것과 달리 한 사람이 상위를 도배해도 흔들리지 않는다.
+  const VIEW = () => API_BASE + (sortBy === 'combo' ? '/best_by_combo' : '/best_by_score');
   const API_KEY = 'sb_publishable_J7xd_-AgszYcyFJaX5qpKg_Nx-YDPzQ';
   const PLAYER_KEY = 'stacker-player-id';
   const TOP_N = 10;
+  // 뷰가 없는 서버를 위한 대비책. 상위 WINDOW 줄을 받아 브라우저에서 추린다 —
+  // 한 사람이 이 창을 통째로 채우면 목록이 짧아지므로 어디까지나 임시 방편이다.
+  const WINDOW = 200;
+  let useView = true;              // 404 를 한 번 받으면 끄고 대비책으로 간다
   const FRESH_MS = 30000;          // 이 시간 안에 받아온 것은 다시 부르지 않는다
 
   let playerId = '';
@@ -462,29 +508,55 @@
     const order = sortBy === 'combo'
       ? 'combo.desc.nullslast,score.desc,created_at.asc'
       : 'score.desc,created_at.asc';
-    const q = `?stage=eq.${stage}&select=*&order=${order}&limit=${TOP_N}`;
-    const r = await fetch(API_URL + q, { headers: apiHeaders(), signal: timeout() });
+    if (useView) {
+      // 한 줄 더 받는다 — 내가 11등이면 순위를 따로 물어보지 않아도 된다
+      const r = await fetch(`${VIEW()}?stage=eq.${stage}&select=*&order=${order}&limit=${TOP_N + 1}`,
+        { headers: apiHeaders(), signal: timeout() });
+      // 뷰를 아직 안 만들었으면 404 다. 랭킹을 통째로 못 보여주느니 대비책으로 내려간다.
+      if (r.status === 404) useView = false;
+      else if (!r.ok) throw new Error('HTTP ' + r.status);
+      else return { rows: await r.json(), exact: true };
+    }
+    const r = await fetch(`${API_URL}?stage=eq.${stage}&select=*&order=${order}&limit=${WINDOW}`,
+      { headers: apiHeaders(), signal: timeout() });
     if (!r.ok) throw new Error('HTTP ' + r.status);
-    return r.json();
+    const raw = await r.json();
+    return { rows: bestPerPlayer(raw), exact: raw.length < WINDOW };
   }
 
-  // 지금 정렬 기준으로 나보다 위에 있는 기록이 몇 개인지 세어 순위를 낸다
-  // (Content-Range: "0-0/123"). NULL 인 combo 는 비교에서 빠지므로 예전 기록은 세지 않는다.
+  // 뷰에서 나보다 위에 있는 "사람" 수를 세어 순위를 낸다 (Content-Range: "0-0/123").
+  // 뷰는 한 사람에 한 줄뿐이므로 이 수가 곧 순위다 — 원본 테이블을 세면 같은 사람의
+  // 여러 판이 겹쳐 세어져 화면 순위와 어긋난다.
   async function fetchRank(stage, value) {
-    const q = `?stage=eq.${stage}&${sortBy}=gt.${value}&select=id`;
-    const r = await fetch(API_URL + q, { headers: { ...apiHeaders(), Prefer: 'count=exact', Range: '0-0' }, signal: timeout() });
+    const r = await fetch(`${VIEW()}?stage=eq.${stage}&${sortBy}=gt.${value}&select=player_id`,
+      { headers: { ...apiHeaders(), Prefer: 'count=exact', Range: '0-0' }, signal: timeout() });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const total = parseInt((r.headers.get('content-range') || '').split('/')[1], 10);
     return Number.isFinite(total) ? total + 1 : null;
   }
 
-  // 내 최고값 — 정렬 기준에 맞춰 고른다
+  // 내 최고값 — 보고 있는 기준에 맞춰 로컬 기록에서 고른다
   function myBest(stage) {
     const rows = boardOf(stage);
     if (!rows.length) return null;
     return sortBy === 'combo'
       ? rows.reduce((m, e) => Math.max(m, e.combo || 0), 0) || null
       : rows[0].score;
+  }
+
+  // 한 사람이 목록을 도배하지 않도록 플레이어마다 한 줄만 남긴다. 어느 줄을 남길지는
+  // 보고 있는 기준을 따른다 — 점수순이면 그 사람의 점수 최고 판, 콤보순이면 콤보 최고 판.
+  // (두 기록을 한 화면에 같이 세우면 같은 사람이 1위와 5위에 겹쳐 나와 순위가 헷갈린다.)
+  // 서버가 이미 그 기준으로 세워 보내므로 처음 나오는 줄이 곧 그 사람의 최고 기록이다.
+  function bestPerPlayer(rows) {
+    const seen = new Set();
+    return rows.filter(e => {
+      // player_id 가 없던 시절의 기록은 묶을 근거가 없으니 각각 남긴다
+      if (!e.player_id) return true;
+      if (seen.has(e.player_id)) return false;
+      seen.add(e.player_id);
+      return true;
+    });
   }
 
   function loadOnline(stage) {
@@ -497,9 +569,29 @@
     // 렌더 → 실패 → 렌더가 무한히 도는 것을 막는다.
     if (c && (c.state === 'loading' || Date.now() - c.at < FRESH_MS)) return;
     online[ck] = { state: 'loading' };
-    const mine = myBest(stage);
-    Promise.all([fetchTop(stage), mine != null ? fetchRank(stage, mine).catch(() => null) : null])
-      .then(([rows, rank]) => { online[ck] = { state: 'ok', rows, rank, at: Date.now() }; })
+    fetchTop(stage)
+      .then(async ({ rows: ranked, exact }) => {
+        // 순위는 화면에 보이는 것과 같은 목록(플레이어별 최고 기록)에서의 자리다.
+        const i = ranked.findIndex(e => e.player_id === playerId);
+        const c = { state: 'ok', rows: ranked.slice(0, TOP_N),
+                    myRank: i >= 0 ? i + 1 : null, myRow: i >= 0 ? ranked[i] : null,
+                    below: null, at: Date.now() };
+        // 받아온 줄 안에 내가 없으면 서버에 자리를 물어본다. 뷰는 한 사람에 한 줄뿐이라
+        // "나보다 위에 있는 줄 수" 가 곧 순위다.
+        const mine = myBest(stage);
+        if (c.myRank == null && mine != null) {
+          if (useView) {
+            c.myRank = await fetchRank(stage, mine).catch(() => null);
+          } else {
+            // 대비책: 받아온 줄 안에서 나보다 나은 사람을 센다. 창이 꽉 찼으면
+            // 그 아래를 못 봤다는 뜻이라 정확한 자리가 아니다.
+            const val = e => sortBy === 'combo' ? (e.combo == null ? -1 : e.combo) : e.score;
+            if (exact) c.myRank = ranked.filter(e => val(e) > mine).length + 1;
+            else c.below = ranked.length;
+          }
+        }
+        online[ck] = c;
+      })
       .catch(() => { online[ck] = { state: 'error', at: Date.now() }; })
       .then(() => { if (viewKey === stage && scope === 'all') renderBoard(); });
   }
@@ -619,9 +711,14 @@
     await store.set(NAME_KEY, memName);
   }
 
-  // TOP 5 진입 여부는 지금 플레이한 단계 안에서만 따진다.
-  function qualifies(s) {
-    if (s <= 0) return false;
+  // 이름은 점수를 냈으면 언제나 적을 수 있다. 예전에는 이 기기의 TOP 5 에 들어야만
+  // 적을 수 있었는데, 그 관문은 "내 기기의 플레이 이력" 으로 높이가 정해져서
+  // 처음 다섯 판은 몇 점이든 통과하고 많이 해본 사람은 좋은 기록도 막혔다.
+  // 전체 랭킹이 생긴 뒤로는 판정 기준(로컬)과 저장 목적지(전체)가 어긋난 셈이었다.
+  const canEnterName = s => s > 0;
+
+  // TOP 5 진입 여부는 이제 축하 문구에만 쓴다. 지금 플레이한 단계 안에서만 따진다.
+  function isTop5(s) {
     const b = boardOf(D().key);
     if (b.length < 5) return true;
     return s > b[b.length - 1].score;
@@ -677,26 +774,25 @@
 
     if (scope === 'me') {
       const mine = localRows(viewKey);
-      boardList.innerHTML = mine.length
+      setBoard(mine.length
         ? head() + mine.map((e, i) => row(e.id === lastEntryId ? 'me' : '', i + 1, e.name, e.score, e.combo)).join('')
-        : `<li class="empty">아직 기록이 없습니다</li>`;
+        : `<li class="empty">아직 기록이 없습니다</li>`);
       return;
     }
 
     loadOnline(viewKey);
     const c = online[cacheKey(viewKey)];
     if (!c || c.state === 'loading') {
-      boardList.innerHTML = `<li class="empty">불러오는 중…</li>`;
+      setBoard(`<li class="empty">불러오는 중…</li>`);
       return;
     }
     if (c.state === 'error') {
       // 못 불러왔다고 빈 화면을 보여주지 않는다 — 내 기록으로 대신한다
       const mine = localRows(viewKey);
-      boardList.innerHTML =
-        `<li class="empty">전체 랭킹을 불러올 수 없어 내 기록을 보여줍니다</li>` +
+      setBoard(`<li class="empty">전체 랭킹을 불러올 수 없어 내 기록을 보여줍니다</li>` +
         (mine.length
           ? head() + mine.map((e, i) => row(e.id === lastEntryId ? 'me' : '', i + 1, e.name, e.score, e.combo)).join('')
-          : `<li class="empty">아직 기록이 없습니다</li>`);
+          : `<li class="empty">아직 기록이 없습니다</li>`));
       return;
     }
     // 이름은 다른 사람이 입력한 값이다 — 반드시 이스케이프한다
@@ -705,12 +801,36 @@
     html += c.rows.length
       ? head() + c.rows.map((e, i) => row(e.player_id === playerId ? 'mine' : '', i + 1, e.name, e.score, e.combo)).join('')
       : `<li class="empty">아직 아무도 기록을 남기지 않았습니다</li>`;
-    // 상위 목록에 내가 없으면 내 순위를 맨 아래에 고정한다
+    setBoard(html, pinnedMine(c));
+  }
+
+  // 상위 목록에 내가 없으면 맨 아래에 따로 고정한다. 목록과 분리해 두었기 때문에
+  // 화면이 짧아 9·10위가 잘려나가도 이 줄은 남는다 — 가장 보고 싶은 줄이다.
+  function pinnedMine(c) {
+    // 목록 안에 내 줄이 실제로 있을 때만 생략한다. 순위만 보고 생략하면, 서버에 내
+    // 기록이 없는데(제출 실패·건너뛰기) 로컬 기록으로 순위만 나온 경우 고정 줄이 사라진다.
+    if (c.myRow && c.myRank <= TOP_N) return '';
+    if (c.myRow) return row('myrank', c.myRank, '내 기록 · ' + c.myRow.name, c.myRow.score, c.myRow.combo);
     const best = localRows(viewKey)[0];
-    if (best && c.rank && !c.rows.some(e => e.player_id === playerId)) {
-      html += row('myrank', c.rank, '내 기록 · ' + best.name, best.score, best.combo);
-    }
-    boardList.innerHTML = html;
+    if (!best) return '';
+    // 자리를 못 센 경우(대비책 + 창이 꽉 참)에는 "이만큼 아래" 라고만 알린다
+    const rank = c.myRank || (c.below ? c.below + '+' : '');
+    return row('myrank', rank, '내 기록 · ' + best.name, best.score, best.combo);
+  }
+
+  // 화면이 짧으면 오버레이가 위아래로 잘린다. 잘려서 안 되는 것은 맨 아래 "내 기록" 이므로
+  // 순위 목록을 아래에서부터 한 줄씩 덜어내며 화면 안에 들어올 때까지 줄인다.
+  // 아주 짧은 화면(가로로 눕혔거나 작은 기기)에서는 1위 한 줄까지 줄여서라도 내 기록을 남긴다
+  const MIN_ROWS = 1;
+  function setBoard(listHtml, mineHtml = '') {
+    boardList.innerHTML = listHtml;
+    boardMine.innerHTML = mineHtml;
+    const items = [...boardList.querySelectorAll('li:not(.head):not(.empty)')];
+    for (let i = items.length - 1; i >= MIN_ROWS && !boardFits(); i--) items[i].style.display = 'none';
+  }
+  function boardFits() {
+    return ovTitle.getBoundingClientRect().top >= 4 &&
+           boardEl.getBoundingClientRect().bottom <= innerHeight - 4;
   }
 
   scopeTabs.addEventListener('pointerdown', e => e.stopPropagation());
@@ -1183,9 +1303,11 @@
     musicPick.classList.remove('show');
     tutBtn.classList.remove('show');
 
-    if (qualifies(score)) {
+    if (canEnterName(score)) {
       state = 'entry';
-      ovMsg.innerHTML = `<span class="newbest">🏆 TOP 5 진입!</span> 이름을 남겨주세요`;
+      ovMsg.innerHTML = isTop5(score)
+        ? `<span class="newbest">🏆 TOP 5 진입!</span> 이름을 남겨주세요`
+        : '이름을 남겨주세요';
       entryBox.classList.add('show');
       nameInput.value = memName || '';
       setTimeout(() => nameInput.focus(), 50);
@@ -1194,6 +1316,15 @@
       ovMsg.textContent = '탭해서 다시 도전';
     }
     renderBoard();
+  }
+
+  // 매 판 이름을 묻게 됐으니 빠져나갈 길이 있어야 한다.
+  // 건너뛴 기록은 로컬에도 전체 랭킹에도 남기지 않는다.
+  function skipEntry() {
+    if (state !== 'entry') return;
+    entryBox.classList.remove('show');
+    state = 'over';
+    ovMsg.textContent = '탭해서 다시 도전';
   }
 
   async function submitName() {
@@ -1389,9 +1520,11 @@
 
   entryBox.addEventListener('pointerdown', e => e.stopPropagation());
   saveBtn.addEventListener('click', submitName);
+  skipBtn.addEventListener('click', skipEntry);
   nameInput.addEventListener('keydown', e => {
     e.stopPropagation();
     if (e.code === 'Enter') submitName();
+    if (e.code === 'Escape') skipEntry();
   });
 
   // ============ 입력 ============
