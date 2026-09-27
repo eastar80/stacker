@@ -228,9 +228,11 @@
   #scopeTabs button.on { background: rgba(238,241,248,.14); color: #eef1f8; }
 
   #board li.mine { color: #ffe27a; }
+  /* 내 기록은 목록 위에 따로 선다. 아래에서부터 줄을 덜어내도 사라지지 않고,
+     10위 안에 들어도 눈으로 찾을 필요가 없다. */
   #board li.myrank {
-    margin-top: 6px; padding-top: 9px;
-    border-top: 1px solid rgba(238,241,248,.14);
+    margin-bottom: 7px; padding-bottom: 9px;
+    border-bottom: 1px solid rgba(238,241,248,.14);
     color: #ffe27a;
   }
   #boardTabs {
@@ -275,6 +277,9 @@
   /* 가로로 눕혔거나 아주 작은 기기 — 큰 점수 글자를 더 줄여 목록 자리를 만든다 */
   @media (max-height: 520px) {
     #overlay { gap: 7px; padding: 8px; }
+    #overlay .tag { display: none; }     /* 장식 문구보다 순위 한 줄이 낫다 */
+    #board li { padding: 2px 0; }
+    #boardTabs button { padding: 4px 2px; }
     #overlay .final { font-size: 38px; }
     #overlay h1 { font-size: 26px; }
     #overlay p { font-size: 14px; }
@@ -438,8 +443,8 @@
     <div id="board" style="display:none">
       <div id="scopeTabs"></div>
       <div id="boardTabs"></div>
-      <ol id="boardList"></ol>
       <ol id="boardMine"></ol>
+      <ol id="boardList"></ol>
     </div>
   </div>
 </div>
@@ -543,9 +548,11 @@
     // select=* 로 받는다. combo 컬럼을 아직 만들지 않은 서버에서도 질의가 깨지지 않는다.
     // combo 는 나중에 생긴 칸이라 예전 기록은 NULL 이다 — 내림차순에서 NULL 이 앞에
     // 오지 않도록 nullslast 를 준다.
+    // 동점은 다른 값으로 가른다 — 콤보가 같으면 점수가 높은 판, 점수가 같으면 콤보가
+    // 높은 판이 그 이름의 대표가 된다. created_at 은 그래도 갈리지 않을 때만 본다.
     const order = sortBy === 'combo'
       ? 'combo.desc.nullslast,score.desc,created_at.asc'
-      : 'score.desc,created_at.asc';
+      : 'score.desc,combo.desc.nullslast,created_at.asc';
     if (useView) {
       // 한 줄 더 받는다 — 내가 11등이면 순위를 따로 물어보지 않아도 된다
       const r = await fetch(`${VIEW()}?stage=eq.${stage}&select=*&order=${order}&limit=${TOP_N + 1}`,
@@ -834,8 +841,8 @@
 
     if (scope === 'me') {
       const mine = localRows(viewKey);
-      setBoard(mine.length
-        ? head() + mine.map((e, i) => row(e.id === lastEntryId ? 'me' : '', i + 1, e.name, e.score, e.combo)).join('')
+      setBoard(mine.length ? head() : '', mine.length
+        ? mine.map((e, i) => row(e.id === lastEntryId ? 'me' : '', i + 1, e.name, e.score, e.combo)).join('')
         : `<li class="empty">아직 기록이 없습니다</li>`);
       return;
     }
@@ -843,15 +850,16 @@
     loadOnline(viewKey);
     const c = online[cacheKey(viewKey)];
     if (!c || c.state === 'loading') {
-      setBoard(`<li class="empty">불러오는 중…</li>`);
+      setBoard('', `<li class="empty">불러오는 중…</li>`);
       return;
     }
     if (c.state === 'error') {
       // 못 불러왔다고 빈 화면을 보여주지 않는다 — 내 기록으로 대신한다
       const mine = localRows(viewKey);
-      setBoard(`<li class="empty">전체 랭킹을 불러올 수 없어 내 기록을 보여줍니다</li>` +
+      setBoard(mine.length ? head() : '',
+        `<li class="empty">전체 랭킹을 불러올 수 없어 내 기록을 보여줍니다</li>` +
         (mine.length
-          ? head() + mine.map((e, i) => row(e.id === lastEntryId ? 'me' : '', i + 1, e.name, e.score, e.combo)).join('')
+          ? mine.map((e, i) => row(e.id === lastEntryId ? 'me' : '', i + 1, e.name, e.score, e.combo)).join('')
           : `<li class="empty">아직 기록이 없습니다</li>`));
       return;
     }
@@ -859,17 +867,16 @@
     let html = submitErr === viewKey
       ? `<li class="empty">방금 기록을 전체 랭킹에 올리지 못했습니다<br>내 기록에는 남아 있습니다</li>` : '';
     html += c.rows.length
-      ? head() + c.rows.map((e, i) => row(isMine(e) ? 'mine' : '', i + 1, e.name, e.score, e.combo)).join('')
+      ? c.rows.map((e, i) => row(isMine(e) ? 'mine' : '', i + 1, e.name, e.score, e.combo)).join('')
       : `<li class="empty">아직 아무도 기록을 남기지 않았습니다</li>`;
-    setBoard(html, pinnedMine(c));
+    setBoard(head() + pinnedMine(c), html);
   }
 
   // 상위 목록에 내가 없으면 맨 아래에 따로 고정한다. 목록과 분리해 두었기 때문에
   // 화면이 짧아 9·10위가 잘려나가도 이 줄은 남는다 — 가장 보고 싶은 줄이다.
+  // 내 기록은 순위와 상관없이 언제나 목록 위에 따로 선다. 10위 안에 들어도 마찬가지다 —
+  // 화면이 짧아 7등까지만 보이더라도 내 기록만큼은 늘 확인할 수 있어야 한다.
   function pinnedMine(c) {
-    // 목록 안에 내 줄이 실제로 있을 때만 생략한다. 순위만 보고 생략하면, 서버에 내
-    // 기록이 없는데(제출 실패·건너뛰기) 로컬 기록으로 순위만 나온 경우 고정 줄이 사라진다.
-    if (c.myRow && c.myRank <= TOP_N) return '';
     if (c.myRow) return row('myrank', c.myRank, '내 기록 · ' + c.myRow.name, c.myRow.score, c.myRow.combo);
     const best = myLocalRow(viewKey) || localRows(viewKey)[0];
     if (!best) return '';
@@ -878,22 +885,15 @@
     return row('myrank', rank, '내 기록 · ' + best.name, best.score, best.combo);
   }
 
-  // 화면이 짧으면 오버레이가 위아래로 잘린다. 잘려서 안 되는 것은 맨 아래 "내 기록" 이므로
-  // 순위 목록을 아래에서부터 한 줄씩 덜어내며 화면 안에 들어올 때까지 줄인다.
-  // 아주 짧은 화면(가로로 눕혔거나 작은 기기)에서는 1위 한 줄까지 줄여서라도 내 기록을 남긴다
-  const MIN_ROWS = 1;
-  function setBoard(listHtml, mineHtml = '') {
-    boardList.innerHTML = listHtml;
-    boardMine.innerHTML = mineHtml;
-    const items = [...boardList.querySelectorAll('li:not(.head):not(.empty)')];
-    let left = items.length;
-    for (let i = items.length - 1; i >= 0 && left > MIN_ROWS && !boardFits(); i--) {
-      // 내 줄은 남긴다. 목록 안에 있다는 이유로 고정 줄을 생략했는데 그 줄이 잘려나가면
-      // 내 기록이 화면에서 통째로 사라진다 — 8위인데 7줄만 들어가는 경우가 그랬다.
-      if (items[i].classList.contains('mine')) continue;
-      items[i].style.display = 'none';
-      left--;
-    }
+  // 화면이 짧으면 오버레이가 위아래로 잘린다. 순위 목록을 아래에서부터 한 줄씩 덜어내며
+  // 화면 안에 들어올 때까지 줄인다. 머리글과 내 기록은 별도 <ol> 이라 건드리지 않는다.
+  // 아주 짧은 화면(가로로 눕혔거나 작은 기기)에서는 순위를 다 덜어내서라도 내 기록을 남긴다.
+  const MIN_ROWS = 0;
+  function setBoard(topHtml, listHtml) {
+    boardMine.innerHTML = topHtml;      // 머리글 + 내 기록 — 언제나 남는다
+    boardList.innerHTML = listHtml;     // 순위 목록 — 모자라면 아래부터 덜어낸다
+    const items = [...boardList.querySelectorAll('li:not(.empty)')];
+    for (let i = items.length - 1; i >= MIN_ROWS && !boardFits(); i--) items[i].style.display = 'none';
   }
   function boardFits() {
     return ovTitle.getBoundingClientRect().top >= 4 &&
@@ -909,15 +909,19 @@
     renderBoard();
   });
 
-  boardList.addEventListener('pointerdown', e => {
-    if (e.target.closest('[data-sort]')) e.stopPropagation();
-  });
-  boardList.addEventListener('click', e => {
-    const btn = e.target.closest('[data-sort]');
-    if (!btn) return;
-    e.stopPropagation();
-    sortBy = btn.dataset.sort;
-    renderBoard();
+  // 머리글은 #boardMine 에 있고 순위는 #boardList 에 있다. 둘 다에 걸어 두면
+  // 머리글이 어느 쪽에 그려지든 정렬 버튼이 동작한다.
+  [boardMine, boardList].forEach(el => {
+    el.addEventListener('pointerdown', e => {
+      if (e.target.closest('[data-sort]')) e.stopPropagation();
+    });
+    el.addEventListener('click', e => {
+      const btn = e.target.closest('[data-sort]');
+      if (!btn) return;
+      e.stopPropagation();
+      sortBy = btn.dataset.sort;
+      renderBoard();
+    });
   });
 
   boardTabs.addEventListener('pointerdown', e => e.stopPropagation());

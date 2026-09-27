@@ -80,9 +80,10 @@
 ## 리더보드
 
 **`전체` 와 `내 기록` 두 가지를 본다.** 기본은 전체 랭킹이고, 단계 탭으로 단계를 바꾼다.
-상위 목록에 내가 없으면 **내 순위가 맨 아래에 고정 행으로** 붙는다. 이 고정 행은 순위
-목록과 **별개의 `<ol>`** 이라 화면이 짧아 목록이 잘려도 남는다 — 9·10위보다 내 기록이
-보이는 쪽이 중요하다.
+
+**내 기록은 목록 맨 위에 따로 선다.** 1위여도 마찬가지다 — 목록 안에서 눈으로 찾을 필요가
+없고, 화면이 짧아 7등까지만 보이더라도 내 기록만큼은 늘 확인된다. 순위 목록과 **별개의
+`<ol>`** 이라 아래에서부터 줄을 덜어내도 영향을 받지 않는다.
 
 목록에는 **그 판의 최고 콤보**도 함께 나온다. 머리글의 `콤보` / `점수` 를 눌러 **순위 기준을
 바꾼다** — 단계별로 각각 매겨진다. 콤보는 나중에 생긴 칸이라 **예전 기록은 비어 있고**,
@@ -121,8 +122,9 @@
 곧 사람 수이고, 그게 화면 순위와 정확히 맞는다. 원본 테이블을 세면 같은 사람의 여러 판이
 겹쳐 세어져 어긋났다.
 
-**화면이 짧아 목록이 잘려도 내 줄은 덜어내지 않는다.** 고정 행은 TOP 10 밖일 때만 붙으므로,
-목록 안에 있다고 생략해 놓고 그 줄을 잘라내면 내 기록이 통째로 사라진다.
+**동점은 다른 값으로 가른다.** 콤보가 같으면 점수가 높은 판이, 점수가 같으면 콤보가 높은
+판이 그 이름의 대표가 된다. `created_at` 은 그래도 갈리지 않을 때만 본다 — 먼저 올린 판을
+우선하면 나중에 더 잘한 판이 묻힌다.
 
 > 뷰가 없으면(404) 예전처럼 상위 200줄을 받아 브라우저에서 추리는 쪽으로 자동으로 내려간다.
 > 랭킹을 통째로 못 보여주는 것보다는 낫기 때문이며, 어디까지나 임시 방편이다.
@@ -151,17 +153,18 @@ HTML 에 그대로 들어가도 된다. 실제 방어는 서버의 RLS 정책과
 drop view if exists best_by_score;
 drop view if exists best_by_combo;
 
--- 이름별 "점수 최고 판" (대소문자 무시)
+-- 이름별 "점수 최고 판" (대소문자 무시). 점수가 같으면 콤보가 높은 판이 대표가 된다.
 create view best_by_score with (security_invoker = true) as
 select distinct on (stage, lower(name)) stage, name, player_id, score, combo, created_at
 from scores
-order by stage, lower(name), score desc, created_at asc;
+order by stage, lower(name), score desc, combo desc nulls last, created_at asc;
 
--- 이름별 "콤보 최고 판" (콤보가 없는 예전 기록만 가진 이름은 그 판이 올라온다)
+-- 이름별 "콤보 최고 판". 콤보가 같으면 점수가 높은 판이 대표가 된다.
+-- (콤보가 없는 예전 기록만 가진 이름은 그 판이 올라온다)
 create view best_by_combo with (security_invoker = true) as
 select distinct on (stage, lower(name)) stage, name, player_id, score, combo, created_at
 from scores
-order by stage, lower(name), combo desc nulls last, created_at asc;
+order by stage, lower(name), combo desc nulls last, score desc, created_at asc;
 
 -- 어떤 이름을 어떤 기기가 쓰고 있는지 (겹침 안내용). 단계와 무관하다.
 create or replace view name_owners with (security_invoker = true) as
@@ -169,8 +172,8 @@ select distinct lower(name) as name_key, player_id from scores;
 
 grant select on best_by_score, best_by_combo, name_owners to anon, authenticated;
 
-create index if not exists scores_name_score_idx on scores (stage, lower(name), score desc, created_at);
-create index if not exists scores_name_combo_idx on scores (stage, lower(name), combo desc nulls last, created_at);
+create index if not exists scores_name_score_idx on scores (stage, lower(name), score desc, combo desc nulls last, created_at);
+create index if not exists scores_name_combo_idx on scores (stage, lower(name), combo desc nulls last, score desc, created_at);
 create index if not exists scores_name_owner_idx on scores (lower(name), player_id);
 
 -- 기기 기준이던 예전 인덱스는 이제 쓰이지 않는다
