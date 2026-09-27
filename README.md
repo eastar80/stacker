@@ -91,19 +91,38 @@
 **단계마다 따로 센다** — 전체는 TOP 10, 내 기록은 TOP 5. 서로 다른 단계의 점수를 한 줄에
 세우면 비교가 되지 않기 때문이다.
 
-**전체 랭킹은 플레이어마다 한 줄만 싣는다.** 많이 한 사람이 자기 기록으로 상위를 도배하면
+**전체 랭킹은 이름마다 한 줄만 싣는다.** 많이 한 사람이 자기 기록으로 상위를 도배하면
 목록이 순위표 구실을 못 한다. 어느 판을 실을지는 보고 있는 기준이 정한다 — 점수순이면 그
 사람의 **점수 최고 판**, 콤보순이면 **콤보 최고 판**이다. `콤보` / `점수` 를 눌러 기준을
 바꾸면 같은 사람의 다른 판이 올라온다. (두 판을 한 화면에 같이 세우면 같은 사람이 1위와
 5위에 겹쳐 나와 순위가 읽히지 않는다.) `내 기록` 탭은 내 판을 다 보여주므로 그대로다.
 
+**기기가 아니라 이름으로 센다.** 기기(`player_id`)로 세면 한 사람이 폰과 PC 로 두 줄을
+차지한다. 기기를 잇는 장치(로그인, 연결 코드)는 두지 않기로 했으므로, 같은 이름은 같은
+사람으로 본다. **대소문자는 무시한다** — `Jw` 와 `JW` 를 다른 줄로 두면 본인이 손으로
+고쳐야 했다. 기본 이름 `익명` 도 다른 이름과 똑같이 한 줄로 묶인다.
+
+> 이름은 비밀이 아니므로 남의 이름을 그대로 적으면 그 줄에 합류한다. 더 잘한 사람이 남의
+> 이름을 쓰면 그 줄을 가져간다. 아래의 겹침 안내가 실수로 겹치는 것은 막지만 작정한 것은
+> 막지 못한다 — 애초에 클라이언트 게임이라 점수 위조도 막을 수 없다.
+
+**이름이 겹치면 저장할 때 한 번 묻는다.** 그 이름을 이 기기에서 쓴 적이 있으면 본인이므로
+묻지 않고 넘어간다. 다른 기기에서만 쓰고 있으면 *"내 다른 기기인가요?"* 를 띄우고
+`그대로 쓰기` / `다른 이름 쓰기` 를 받는다. 한 번 `그대로 쓰기` 로 저장하면 그 쌍이 서버에
+남으므로 **(이름 × 기기)마다 딱 한 번만** 뜬다. 기본 이름 `익명` 은 여러 사람이 함께 쓰는
+값이라 묻지 않고, 조회가 실패해도 묻지 않고 저장한다 — 네트워크 때문에 기록을 못 남기면
+안 되기 때문이다.
+
 추리는 일은 **서버의 뷰**가 한다(`best_by_score` / `best_by_combo`). 브라우저가 상위 몇 줄만
 받아 추리면 한 사람이 그 범위를 통째로 채웠을 때 목록이 무너진다 — 210판을 쌓은 플레이어
 하나로 TOP 10 이 한 줄이 되는 것을 확인했다. 뷰는 전체 기록을 보고 고르므로 그런 일이 없다.
 
-**내 순위도 그 뷰에서의 자리다.** 뷰는 한 사람에 한 줄뿐이라 "나보다 위에 있는 줄 수" 가
+**내 순위도 그 뷰에서의 자리다.** 뷰는 이름마다 한 줄뿐이라 "나보다 위에 있는 줄 수" 가
 곧 사람 수이고, 그게 화면 순위와 정확히 맞는다. 원본 테이블을 세면 같은 사람의 여러 판이
 겹쳐 세어져 어긋났다.
+
+**화면이 짧아 목록이 잘려도 내 줄은 덜어내지 않는다.** 고정 행은 TOP 10 밖일 때만 붙으므로,
+목록 안에 있다고 생략해 놓고 그 줄을 잘라내면 내 기록이 통째로 사라진다.
 
 > 뷰가 없으면(404) 예전처럼 상위 200줄을 받아 브라우저에서 추리는 쪽으로 자동으로 내려간다.
 > 랭킹을 통째로 못 보여주는 것보다는 낫기 때문이며, 어디까지나 임시 방편이다.
@@ -124,26 +143,39 @@ HTML 에 그대로 들어가도 된다. 실제 방어는 서버의 RLS 정책과
 
 > 서버에 `combo` 칸(`int`, NULL 허용)이 있어야 한다. 없으면 기록 제출이 400 으로 거부된다.
 
-플레이어별 최고 기록은 **뷰**로 뽑는다. 테이블을 따로 두면 원본과 어긋날 수 있지만
+이름별 최고 기록은 **뷰**로 뽑는다. 테이블을 따로 두면 원본과 어긋날 수 있지만
 (트리거 누락·삭제·백필), 뷰는 `scores` 를 그때그때 계산하므로 어긋날 수가 없다.
 
 ```sql
--- 플레이어별 "점수 최고 판"
-create or replace view best_by_score with (security_invoker = true) as
-select distinct on (stage, player_id) stage, player_id, name, score, combo, created_at
+-- 컬럼 순서가 바뀌므로 create or replace 로는 안 된다. 지웠다 다시 만든다.
+drop view if exists best_by_score;
+drop view if exists best_by_combo;
+
+-- 이름별 "점수 최고 판" (대소문자 무시)
+create view best_by_score with (security_invoker = true) as
+select distinct on (stage, lower(name)) stage, name, player_id, score, combo, created_at
 from scores
-order by stage, player_id, score desc, created_at asc;
+order by stage, lower(name), score desc, created_at asc;
 
--- 플레이어별 "콤보 최고 판" (콤보가 없는 예전 기록만 가진 사람은 그 판이 올라온다)
-create or replace view best_by_combo with (security_invoker = true) as
-select distinct on (stage, player_id) stage, player_id, name, score, combo, created_at
+-- 이름별 "콤보 최고 판" (콤보가 없는 예전 기록만 가진 이름은 그 판이 올라온다)
+create view best_by_combo with (security_invoker = true) as
+select distinct on (stage, lower(name)) stage, name, player_id, score, combo, created_at
 from scores
-order by stage, player_id, combo desc nulls last, created_at asc;
+order by stage, lower(name), combo desc nulls last, created_at asc;
 
-grant select on best_by_score, best_by_combo to anon, authenticated;
+-- 어떤 이름을 어떤 기기가 쓰고 있는지 (겹침 안내용). 단계와 무관하다.
+create or replace view name_owners with (security_invoker = true) as
+select distinct lower(name) as name_key, player_id from scores;
 
-create index if not exists scores_best_score_idx on scores (stage, player_id, score desc, created_at);
-create index if not exists scores_best_combo_idx on scores (stage, player_id, combo desc nulls last, created_at);
+grant select on best_by_score, best_by_combo, name_owners to anon, authenticated;
+
+create index if not exists scores_name_score_idx on scores (stage, lower(name), score desc, created_at);
+create index if not exists scores_name_combo_idx on scores (stage, lower(name), combo desc nulls last, created_at);
+create index if not exists scores_name_owner_idx on scores (lower(name), player_id);
+
+-- 기기 기준이던 예전 인덱스는 이제 쓰이지 않는다
+drop index if exists scores_best_score_idx;
+drop index if exists scores_best_combo_idx;
 ```
 
 `security_invoker` 는 뷰가 `scores` 의 RLS 정책을 그대로 따르게 한다(PostgreSQL 15 이상).
