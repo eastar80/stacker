@@ -233,8 +233,11 @@
   #boardMine:empty { display: none; }
 
   /* 주소창·하단바가 보이는 휴대폰은 세로가 크게 모자란다. 글자와 여백을 줄여
-     순위를 한 줄이라도 더 남긴다 — 모자라면 fitBoard() 가 아래에서부터 덜어낸다. */
-  @media (max-height: 700px) {
+     순위를 한 줄이라도 더 남긴다 — 모자라면 fitBoard() 가 아래에서부터 덜어낸다.
+     기준선 760px 은 재어서 정했다: 원래 크기로 시작 화면(난이도 선택까지 보이는 가장
+     높은 화면)이 TOP 10 을 담는 한계가 760px 이다. 더 높게 잡으면 필요 없는데도 글자가
+     작아지고, 더 낮게 잡으면 730px 짜리 폰에서 8줄로 잘린다. */
+  @media (max-height: 760px) {
     #overlay { gap: 10px; padding: 12px; }
     #overlay .final { font-size: 54px; }
     #overlay h1 { font-size: 34px; }
