@@ -79,6 +79,10 @@
   /* opacity 만으로 숨기면 요소가 그대로 살아 있어, 그 위를 누른 탭을 리더보드 탭
      버튼이 먹어버린다(pointer-events: auto + stopPropagation). 화면 한가운데에
      블록이 놓이지 않는 죽은 구간이 생겼다. visibility 로 자식까지 함께 끈다. */
+  /* 보드를 뺀 나머지 묶음. 휴대폰에서는 DOM 에 없는 것처럼 굴어 지금 배치가 그대로 유지된다.
+     PC 에서만 진짜 세로 묶음이 되어 보드와 좌우로 갈라선다. */
+  #ovSide { display: contents; }
+
   #overlay.hidden {
     opacity: 0; visibility: hidden;
     transition: opacity .25s, visibility 0s .25s;
@@ -178,6 +182,21 @@
     border: 2px solid rgba(238,241,248,.18); font-weight: 600;
   }
   #nameWarn button:active { transform: scale(.96); }
+
+  /* ===== PC: 보드를 오른쪽으로 빼 화면 높이를 다 쓴다 =====
+     세로로만 늘리면 fitBoard() 가 아래부터 잘라내 11줄에서 멈춘다(1280x720 기준).
+     가로를 쓰면 같은 화면에서 42줄까지 들어간다. 휴대폰은 이 블록 밖이라 그대로다. */
+  @media (min-width: 1024px) and (min-height: 600px) {
+    #overlay { flex-direction: row; align-items: center; justify-content: center; gap: 40px; }
+    #ovSide {
+      display: flex; flex-direction: column; align-items: center; gap: 14px;
+    }
+    #board { width: 340px; max-width: none; }
+    /* 줄이 많을 때만 2단으로 벌린다 — 적은데 벌리면 4줄/3줄로 갈려 허전하다 */
+    #board.cols { width: 680px; }
+    #board.cols #boardList { column-count: 2; column-gap: 28px; }
+    #board li { break-inside: avoid; }
+  }
 
   #hudLeft { display: flex; flex-direction: column; gap: 9px; }
 
@@ -420,6 +439,7 @@
   <div id="tutBar"><div class="msg"></div><div class="cue"></div></div>
   <button id="tutSkip">건너뛰기</button>
   <div id="overlay">
+    <div id="ovSide">
     <h1 id="ovTitle">STACKER</h1>
     <p id="ovMsg">탭 또는 스페이스로 블록을 쌓으세요</p>
     <div class="tag" id="ovTag">딱 맞게 쌓으면 콤보!</div>
@@ -439,6 +459,7 @@
         <button id="warnKeep">그대로 쓰기</button>
         <button id="warnRename">다른 이름 쓰기</button>
       </div>
+    </div>
     </div>
     <div id="board" style="display:none">
       <div id="scopeTabs"></div>
@@ -526,7 +547,15 @@
   const API_KEY = 'sb_publishable_J7xd_-AgszYcyFJaX5qpKg_Nx-YDPzQ';
   const PLAYER_KEY = 'stacker-player-id';
   const ANON = '익명';             // 여러 사람이 함께 쓰는 기본 이름 — 겹침을 묻지 않는다
-  const TOP_N = 10;
+  const TOP_N = 10;                 // 휴대폰에서 보여줄 줄 수 — 세로가 모자라 더 늘릴 수 없다
+  const TOP_WIDE = 30;              // PC(좌우 분할 + 2단)에서 보여줄 줄 수
+  // 늘 넉넉히 받아 화면에서 자른다. PC/휴대폰으로 limit 을 나누면 캐시가 갈라지고
+  // 창 크기를 바꿀 때마다 다시 받아야 한다. 31줄이라야 7KB 남짓이라 부담이 없다.
+  const WIDE = matchMedia('(min-width: 1024px) and (min-height: 600px)');
+  const shownN = () => WIDE.matches ? TOP_WIDE : TOP_N;
+  const COLS_FROM = 15;             // 이 줄 수를 넘으면 2단으로 벌린다
+  // 폭/높이가 기준선을 넘나들면 보여줄 줄 수와 단 수가 바뀐다 (resize 와 별개로 한 번 더 건다)
+  WIDE.addEventListener('change', () => { if (boardEl.style.display !== 'none') renderBoard(); });
   // 뷰가 없는 서버를 위한 대비책. 상위 WINDOW 줄을 받아 브라우저에서 추린다 —
   // 한 사람이 이 창을 통째로 채우면 목록이 짧아지므로 어디까지나 임시 방편이다.
   const WINDOW = 200;
@@ -563,7 +592,7 @@
   async function fetchTop(stage) {
     if (useView) {
       // 한 줄 더 받는다 — 내가 11등이면 순위를 따로 물어보지 않아도 된다
-      const r = await fetch(`${VIEW()}?stage=eq.${stage}&select=*&order=${rankOrder()}&limit=${TOP_N + 1}`,
+      const r = await fetch(`${VIEW()}?stage=eq.${stage}&select=*&order=${rankOrder()}&limit=${TOP_WIDE + 1}`,
         { headers: apiHeaders(), signal: timeout() });
       // 뷰를 아직 안 만들었으면 404 다. 랭킹을 통째로 못 보여주느니 대비책으로 내려간다.
       if (r.status === 404) useView = false;
@@ -651,7 +680,7 @@
       .then(async ({ rows: ranked, exact }) => {
         // 순위는 화면에 보이는 것과 같은 목록(플레이어별 최고 기록)에서의 자리다.
         const i = ranked.findIndex(isMine);
-        const c = { state: 'ok', rows: ranked.slice(0, TOP_N),
+        const c = { state: 'ok', rows: ranked,
                     myRank: i >= 0 ? i + 1 : null, myRow: i >= 0 ? ranked[i] : null,
                     below: null, at: Date.now() };
         // 받아온 줄 안에 내가 없으면 서버에 자리를 물어본다. 뷰는 한 사람에 한 줄뿐이라
@@ -891,8 +920,9 @@
     // 이름은 다른 사람이 입력한 값이다 — 반드시 이스케이프한다
     let html = submitErr === viewKey
       ? `<li class="empty">방금 기록을 전체 랭킹에 올리지 못했습니다<br>내 기록에는 남아 있습니다</li>` : '';
-    html += c.rows.length
-      ? c.rows.map((e, i) => row(isMine(e) ? 'mine' : '', i + 1, e.name, e.score, e.combo)).join('')
+    const shown = c.rows.slice(0, shownN());
+    html += shown.length
+      ? shown.map((e, i) => row(isMine(e) ? 'mine' : '', i + 1, e.name, e.score, e.combo)).join('')
       : `<li class="empty">아직 아무도 기록을 남기지 않았습니다</li>`;
     setBoard(head() + pinnedMine(c), html);
   }
@@ -918,6 +948,8 @@
     boardMine.innerHTML = topHtml;      // 머리글 + 내 기록 — 언제나 남는다
     boardList.innerHTML = listHtml;     // 순위 목록 — 모자라면 아래부터 덜어낸다
     const items = [...boardList.querySelectorAll('li:not(.empty)')];
+    // 2단은 줄이 많을 때만. 클래스만 걸어 두면 PC 미디어쿼리 안에서만 효과가 난다.
+    boardEl.classList.toggle('cols', items.length > COLS_FROM);
     for (let i = items.length - 1; i >= MIN_ROWS && !boardFits(); i--) items[i].style.display = 'none';
   }
   function boardFits() {
