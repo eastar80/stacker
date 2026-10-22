@@ -98,6 +98,7 @@
   #overlay .newbest { color: #ffe27a; font-weight: 700; font-size: 17px; }
 
   #board {
+    position: relative;
     min-width: 250px; max-width: 320px; width: 100%;
     background: rgba(12,16,26,.55); border-radius: 16px;
     padding: 16px 20px; backdrop-filter: blur(6px);
@@ -197,6 +198,11 @@
     #board.cols #boardList { column-count: 2; column-gap: 28px; }
     #board li { break-inside: avoid; }
   }
+  /* 폭이 더 넉넉하면 3단까지. 1020px 보드 + 왼쪽 묶음이 들어가려면 1400px 는 돼야 한다. */
+  @media (min-width: 1400px) and (min-height: 600px) {
+    #board.cols { width: 1020px; }
+    #board.cols #boardList { column-count: 3; }
+  }
 
   #hudLeft { display: flex; flex-direction: column; gap: 9px; }
 
@@ -272,6 +278,36 @@
     color: rgba(238,241,248,.4); padding: 10px 0;
   }
   #boardMine:empty { display: none; }
+
+  /* 보드를 화면 가득 띄우는 버튼. 보드 자체는 탭을 통과시켜 "다시 도전" 으로 쓰이므로
+     여는 길은 이 작은 버튼 하나뿐이어야 한다. */
+  #expandBtn {
+    position: absolute; top: 12px; right: 12px; z-index: 2;
+    width: 28px; height: 28px; padding: 0; border-radius: 8px;
+    border: none; background: rgba(238,241,248,.08); color: rgba(238,241,248,.5);
+    font-family: inherit; font-size: 14px; line-height: 1; cursor: pointer;
+    pointer-events: auto;
+  }
+  #expandBtn:active { transform: scale(.92); }
+
+  /* ===== 순위 전체화면 =====
+     제목·난이도·음악을 감추고 보드만 띄운다. 글자 크기를 줄이지 않고도 줄 수가 두 배가
+     되고, 전용 화면이라 목록에 스크롤을 줘도 "다시 도전" 과 부딪히지 않는다. */
+  #wrap.sheet #ovSide { display: none; }
+  #wrap.sheet #overlay { padding: 0; flex-direction: column; }
+  #wrap.sheet #board {
+    /* left/right 를 함께 두고 margin-inline: auto 를 주면 가운데로 모인다.
+       PC 에서 한 줄이 1400px 로 늘어나면 이름과 점수가 너무 멀어 읽기 나쁘다. */
+    position: fixed; inset: 10px; width: auto; max-width: 560px; margin-inline: auto;
+    display: flex; flex-direction: column;
+    background: rgba(12,16,26,.92);
+  }
+  #wrap.sheet #boardList {
+    flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+    pointer-events: auto;                 /* 전용 화면에서만 — 평소엔 탭을 통과시켜야 한다 */
+    -webkit-overflow-scrolling: touch;
+  }
+  #wrap.sheet #expandBtn { background: rgba(238,241,248,.14); color: #eef1f8; }
 
   /* 주소창·하단바가 보이는 휴대폰은 세로가 크게 모자란다. 글자와 여백을 줄여
      순위를 한 줄이라도 더 남긴다 — 모자라면 fitBoard() 가 아래에서부터 덜어낸다.
@@ -462,6 +498,7 @@
     </div>
     </div>
     <div id="board" style="display:none">
+      <button id="expandBtn" aria-label="순위 크게 보기">⤢</button>
       <div id="scopeTabs"></div>
       <div id="boardTabs"></div>
       <ol id="boardMine"></ol>
@@ -491,7 +528,9 @@
   const warnMsg = nameWarn.querySelector('.msg');
   const warnKeep = document.getElementById('warnKeep');
   const warnRename = document.getElementById('warnRename');
+  const wrap = document.getElementById('wrap');
   const boardEl = document.getElementById('board');
+  const expandBtn = document.getElementById('expandBtn');
   const boardList = document.getElementById('boardList');
   const muteBtn = document.getElementById('muteBtn');
   const diffBadge = document.getElementById('diffBadge');
@@ -547,13 +586,41 @@
   const API_KEY = 'sb_publishable_J7xd_-AgszYcyFJaX5qpKg_Nx-YDPzQ';
   const PLAYER_KEY = 'stacker-player-id';
   const ANON = '익명';             // 여러 사람이 함께 쓰는 기본 이름 — 겹침을 묻지 않는다
-  const TOP_N = 10;                 // 휴대폰에서 보여줄 줄 수 — 세로가 모자라 더 늘릴 수 없다
-  const TOP_WIDE = 30;              // PC(좌우 분할 + 2단)에서 보여줄 줄 수
+  const TOP_N = 10;                 // 휴대폰 기본 화면 — 세로가 모자라 더 늘릴 수 없다
+  const TOP_WIDE = 50;              // PC 기본 화면 (좌우 분할 + 2~3단)
+  const TOP_SHEET = 50;             // 순위 전체화면 — 스크롤이 있어 화면 높이에 매이지 않는다
   // 늘 넉넉히 받아 화면에서 자른다. PC/휴대폰으로 limit 을 나누면 캐시가 갈라지고
   // 창 크기를 바꿀 때마다 다시 받아야 한다. 31줄이라야 7KB 남짓이라 부담이 없다.
   const WIDE = matchMedia('(min-width: 1024px) and (min-height: 600px)');
-  const shownN = () => WIDE.matches ? TOP_WIDE : TOP_N;
-  const COLS_FROM = 15;             // 이 줄 수를 넘으면 2단으로 벌린다
+  const shownN = () => sheetOpen ? TOP_SHEET : (WIDE.matches ? TOP_WIDE : TOP_N);
+  const COLS_FROM = 15;             // 이 줄 수를 넘으면 여러 단으로 벌린다
+
+  // ===== 순위 전체화면 =====
+  // 게임 상태(state)는 건드리지 않는다. 열려 있어도 ready/over 그대로이므로, 닫으면
+  // 그 다음 탭이 원래대로 동작한다(ready → 시작, over → 다시 도전).
+  let sheetOpen = false;
+  let sheetPushed = false;          // 뒤로가기용으로 쌓아둔 기록이 있는지
+  function setSheet(on) {
+    if (sheetOpen === on) return;
+    sheetOpen = on;
+    wrap.classList.toggle('sheet', on);
+    expandBtn.textContent = on ? '✕' : '⤢';
+    expandBtn.setAttribute('aria-label', on ? '순위 닫기' : '순위 크게 보기');
+    renderBoard();
+    if (on) boardList.scrollTop = 0;
+  }
+  function openSheet() {
+    setSheet(true);
+    // 휴대폰에서 전체화면이 뜨면 뒤로가기로 닫길 기대한다. 안 쌓아두면 사이트를 떠난다.
+    try { history.pushState({ sheet: 1 }, ''); sheetPushed = true; } catch (e) {}
+  }
+  function closeSheet(fromPop) {
+    if (!sheetOpen) return;
+    setSheet(false);
+    if (!fromPop && sheetPushed) { sheetPushed = false; try { history.back(); } catch (e) {} }
+    else sheetPushed = false;
+  }
+  addEventListener('popstate', () => { if (sheetOpen) closeSheet(true); });
   // 폭/높이가 기준선을 넘나들면 보여줄 줄 수와 단 수가 바뀐다 (resize 와 별개로 한 번 더 건다)
   WIDE.addEventListener('change', () => { if (boardEl.style.display !== 'none') renderBoard(); });
   // 뷰가 없는 서버를 위한 대비책. 상위 WINDOW 줄을 받아 브라우저에서 추린다 —
@@ -592,7 +659,7 @@
   async function fetchTop(stage) {
     if (useView) {
       // 한 줄 더 받는다 — 내가 11등이면 순위를 따로 물어보지 않아도 된다
-      const r = await fetch(`${VIEW()}?stage=eq.${stage}&select=*&order=${rankOrder()}&limit=${TOP_WIDE + 1}`,
+      const r = await fetch(`${VIEW()}?stage=eq.${stage}&select=*&order=${rankOrder()}&limit=${TOP_SHEET + 1}`,
         { headers: apiHeaders(), signal: timeout() });
       // 뷰를 아직 안 만들었으면 404 다. 랭킹을 통째로 못 보여주느니 대비책으로 내려간다.
       if (r.status === 404) useView = false;
@@ -882,7 +949,9 @@
 
   function renderBoard() {
     updateBestHUD();
-    boardEl.style.display = 'block';    // 전체 랭킹이 있으니 내 기록이 없어도 보여준다
+    // 전체 랭킹이 있으니 내 기록이 없어도 보여준다. 인라인 style 이 CSS 를 이기므로
+    // 전체화면일 때의 flex 배치도 여기서 같이 정해야 한다 — 안 그러면 목록이 안 스크롤된다.
+    boardEl.style.display = sheetOpen ? 'flex' : 'block';
     if (!viewKey) viewKey = D().key;
 
     scopeTabs.innerHTML =
@@ -949,7 +1018,8 @@
     boardList.innerHTML = listHtml;     // 순위 목록 — 모자라면 아래부터 덜어낸다
     const items = [...boardList.querySelectorAll('li:not(.empty)')];
     // 2단은 줄이 많을 때만. 클래스만 걸어 두면 PC 미디어쿼리 안에서만 효과가 난다.
-    boardEl.classList.toggle('cols', items.length > COLS_FROM);
+    boardEl.classList.toggle('cols', !sheetOpen && items.length > COLS_FROM);
+    if (sheetOpen) return;            // 전체화면은 스크롤이 있으니 덜어낼 필요가 없다
     for (let i = items.length - 1; i >= MIN_ROWS && !boardFits(); i--) items[i].style.display = 'none';
   }
   function boardFits() {
@@ -965,6 +1035,13 @@
     scope = btn.dataset.s;
     renderBoard();
   });
+
+  // drop 이 window 에 걸려 있어 덮어놓는 것만으로는 부족하다. 버블링을 끊어야
+  // 버튼 탭과 목록 스크롤이 게임으로 새지 않는다.
+  expandBtn.addEventListener('pointerdown', e => e.stopPropagation());
+  expandBtn.addEventListener('click', e => { e.stopPropagation(); sheetOpen ? closeSheet() : openSheet(); });
+  boardEl.addEventListener('pointerdown', e => { if (sheetOpen) e.stopPropagation(); });
+  boardEl.addEventListener('click', e => { if (sheetOpen) e.stopPropagation(); });
 
   // 머리글은 #boardMine 에 있고 순위는 #boardList 에 있다. 둘 다에 걸어 두면
   // 머리글이 어느 쪽에 그려지든 정렬 버튼이 동작한다.
@@ -1291,6 +1368,7 @@
   }
 
   function reset() {
+    closeSheet();                     // 판이 새로 깔리면 전체화면은 닫혀 있어야 한다
     hueBase = Math.random() * 360;
     blocks = [];
     debris = [];
@@ -1691,6 +1769,8 @@
   // ============ 입력 ============
   addEventListener('pointerdown', drop);
   addEventListener('keydown', e => {
+    // 전체화면이 떠 있으면 ESC 로 닫고, 그 밖의 키는 게임으로 보내지 않는다
+    if (sheetOpen) { if (e.code === 'Escape') { e.preventDefault(); closeSheet(); } return; }
     if (state === 'entry') return;
     if (e.code === 'Space' || e.code === 'Enter') { e.preventDefault(); drop(); }
   });

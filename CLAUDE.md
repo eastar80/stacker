@@ -42,6 +42,14 @@
   줄 수가 `COLS_FROM`(15)을 넘을 때만 JS 가 클래스를 붙인다(클래스는 PC 쿼리 안에서만 효과).
   조회는 늘 `TOP_WIDE + 1` 줄을 받고 **자르는 일은 그릴 때** 한다 — limit 을 화면별로 나누면
   캐시가 갈라지고 창 크기를 바꿀 때마다 다시 받아야 한다.
+- **순위 전체화면**(`#wrap.sheet`): `⤢`(`#expandBtn`) 으로 연다. **게임 상태(`state`)는
+  건드리지 않는다** — 열려 있어도 `ready`/`over` 그대로라, 닫으면 다음 탭이 원래대로 돈다.
+  `drop` 이 **window** 에 걸려 있어 덮어놓는 것만으로는 부족하다: 버튼과 보드에
+  `pointerdown` stopPropagation 을 걸어야 탭과 스크롤이 게임으로 새지 않고, `keydown` 은
+  맨 앞에서 가로챈다. 닫기는 `✕`/`ESC`/뒤로가기(`pushState` + `popstate`).
+  전체화면에서는 줄을 덜어내지 않는다(스크롤이 대신한다). **`renderBoard()` 가
+  `boardEl.style.display` 를 인라인으로 쓰므로 flex 배치도 거기서 같이 정해야 한다** —
+  CSS 로만 두면 인라인 `block` 에 져서 목록이 스크롤되지 않는다.
 - **리더보드 그리기**: `setBoard(목록, 내기록)` 이 `#boardList` 와 `#boardMine` 을 따로
   채운다. **고정 행을 목록 밖으로 뺀 이유**는 화면이 짧을 때다 — `setBoard` 가 화면에
   들어올 때까지 목록을 아래에서부터 `display:none` 으로 덜어내는데(`boardFits()`,
