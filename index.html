@@ -282,10 +282,10 @@
   /* 보드를 화면 가득 띄우는 버튼. 보드 자체는 탭을 통과시켜 "다시 도전" 으로 쓰이므로
      여는 길은 이 작은 버튼 하나뿐이어야 한다. */
   #expandBtn {
-    position: absolute; top: 12px; right: 12px; z-index: 2;
-    width: 28px; height: 28px; padding: 0; border-radius: 8px;
-    border: none; background: rgba(238,241,248,.08); color: rgba(238,241,248,.5);
-    font-family: inherit; font-size: 14px; line-height: 1; cursor: pointer;
+    position: absolute; top: 10px; right: 10px; z-index: 2;
+    width: 34px; height: 34px; padding: 0; border-radius: 9px;
+    border: none; background: rgba(238,241,248,.12); color: rgba(238,241,248,.72);
+    font-family: inherit; font-size: 17px; line-height: 1; cursor: pointer;
     pointer-events: auto;
   }
   #expandBtn:active { transform: scale(.92); }
@@ -307,7 +307,11 @@
     pointer-events: auto;                 /* 전용 화면에서만 — 평소엔 탭을 통과시켜야 한다 */
     -webkit-overflow-scrolling: touch;
   }
-  #wrap.sheet #expandBtn { background: rgba(238,241,248,.14); color: #eef1f8; }
+  /* 전체화면에서는 글자를 붙여 "여기를 누르면 닫힌다" 를 분명히 한다 */
+  #wrap.sheet #expandBtn {
+    width: auto; padding: 0 12px; font-size: 13px; font-weight: 700;
+    background: rgba(238,241,248,.16); color: #eef1f8;
+  }
 
   /* 주소창·하단바가 보이는 휴대폰은 세로가 크게 모자란다. 글자와 여백을 줄여
      순위를 한 줄이라도 더 남긴다 — 모자라면 fitBoard() 가 아래에서부터 덜어낸다.
@@ -604,7 +608,7 @@
     if (sheetOpen === on) return;
     sheetOpen = on;
     wrap.classList.toggle('sheet', on);
-    expandBtn.textContent = on ? '✕' : '⤢';
+    expandBtn.textContent = on ? '✕ 닫기' : '⤢';
     expandBtn.setAttribute('aria-label', on ? '순위 닫기' : '순위 크게 보기');
     renderBoard();
     if (on) boardList.scrollTop = 0;
@@ -621,6 +625,15 @@
     else sheetPushed = false;
   }
   addEventListener('popstate', () => { if (sheetOpen) closeSheet(true); });
+
+  // 한 판이 끝났을 때의 마무리. 휴대폰에서는 순위를 먼저 크게 띄운다 — 작은 ⤢ 버튼만으로는
+  // 전체 순위를 볼 수 있다는 것 자체를 알아채기 어렵다. PC 는 기본 화면이 이미 넓어 그대로 둔다.
+  // 이름 입력이 끝난 뒤에만 부른다. 입력창은 #ovSide 안에 있어 전체화면이 뜨면 가려진다.
+  function endRound() {
+    state = 'over';
+    ovMsg.textContent = '탭해서 다시 도전';
+    if (!WIDE.matches) openSheet();
+  }
   // 폭/높이가 기준선을 넘나들면 보여줄 줄 수와 단 수가 바뀐다 (resize 와 별개로 한 번 더 건다)
   WIDE.addEventListener('change', () => { if (boardEl.style.display !== 'none') renderBoard(); });
   // 뷰가 없는 서버를 위한 대비책. 상위 WINDOW 줄을 받아 브라우저에서 추린다 —
@@ -1519,8 +1532,9 @@
       nameInput.value = memName || '';
       setTimeout(() => nameInput.focus(), 50);
     } else {
-      state = 'over';
-      ovMsg.textContent = '탭해서 다시 도전';
+      renderBoard();            // 순위를 먼저 그려 둔 뒤에 전체화면을 띄운다
+      endRound();
+      return;
     }
     renderBoard();
   }
@@ -1531,8 +1545,7 @@
     if (state !== 'entry') return;
     entryBox.classList.remove('show');
     nameWarn.classList.remove('show');
-    state = 'over';
-    ovMsg.textContent = '탭해서 다시 도전';
+    endRound();
   }
 
   let checkingName = false;
@@ -1569,9 +1582,8 @@
     submitOnline(D().key, name, score, maxCombo);
     entryBox.classList.remove('show');
     nameWarn.classList.remove('show');
-    state = 'over';
-    ovMsg.textContent = '탭해서 다시 도전';
-    renderBoard();
+    renderBoard();              // 방금 올린 기록이 실린 순위를 그려 둔 뒤에 띄운다
+    endRound();
     beep(660, 0.1, 'triangle', 0.14);
   }
 
