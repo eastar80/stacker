@@ -47,7 +47,9 @@
   `drop` 이 **window** 에 걸려 있어 덮어놓는 것만으로는 부족하다: 버튼과 보드에
   `pointerdown` stopPropagation 을 걸어야 탭과 스크롤이 게임으로 새지 않고, `keydown` 은
   맨 앞에서 가로챈다. 닫기는 `✕`/`ESC`/뒤로가기(`pushState` + `popstate`).
-  전체화면에서는 줄을 덜어내지 않는다(스크롤이 대신한다). **`renderBoard()` 가
+  전체화면에서는 줄을 덜어내지 않는다(스크롤이 대신한다).
+  한 판의 마무리는 `endRound()` 한곳으로 모았다 — 휴대폰이면 거기서 전체화면을 띄운다.
+  **이름 입력이 끝난 뒤에만** 불러야 한다. 입력창은 `#ovSide` 안이라 전체화면이 뜨면 가려진다. **`renderBoard()` 가
   `boardEl.style.display` 를 인라인으로 쓰므로 flex 배치도 거기서 같이 정해야 한다** —
   CSS 로만 두면 인라인 `block` 에 져서 목록이 스크롤되지 않는다.
 - **리더보드 그리기**: `setBoard(목록, 내기록)` 이 `#boardList` 와 `#boardMine` 을 따로
