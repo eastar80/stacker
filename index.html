@@ -610,8 +610,30 @@
     wrap.classList.toggle('sheet', on);
     expandBtn.textContent = on ? '✕ 닫기' : '⤢';
     expandBtn.setAttribute('aria-label', on ? '순위 닫기' : '순위 크게 보기');
+    if (on) sheetSeek = true;        // 줄이 그려진 뒤에 내 위치로 맞춘다
     renderBoard();
-    if (on) boardList.scrollTop = 0;
+  }
+
+  // 전체화면에서 내 줄을 화면 가운데로 보낸다.
+  //
+  // 여는 시점이 아니라 "줄이 실제로 그려진 뒤" 에 해야 한다 — 열 때는 아직 불러오는 중일 수
+  // 있다. 게다가 한 번 맞추고 끝내서도 안 된다: 기록을 저장하면 제출 응답이 캐시를 비워
+  // 목록이 "불러오는 중…" 으로 갈리고, innerHTML 이 바뀌며 스크롤이 0 으로 풀린다.
+  //
+  // 그래서 "사용자가 손을 댈 때까지" 는 그릴 때마다 맞춘다. 손을 댄 뒤로는 건드리지 않아
+  // 30초 갱신이나 재조회가 읽고 있던 화면을 튀게 하지 않는다.
+  let sheetSeek = false;
+  ['pointerdown', 'wheel'].forEach(t =>
+    boardList.addEventListener(t, () => { sheetSeek = false; }, { passive: true }));
+
+  function seekToMine() {
+    if (!sheetOpen || !sheetSeek) return;
+    if (!boardList.querySelector('li:not(.empty)')) return;   // 아직 안 그려졌다
+    const me = boardList.querySelector('li.mine');
+    if (!me) { boardList.scrollTop = 0; return; }   // 목록 밖(50위 초과)이거나 내 기록 탭
+    // offsetTop 의 기준점은 #boardList 가 아니라 #board 다. 두 사각형의 차로 구한다.
+    const top = me.getBoundingClientRect().top - boardList.getBoundingClientRect().top + boardList.scrollTop;
+    boardList.scrollTop = top - (boardList.clientHeight - me.offsetHeight) / 2;   // 범위는 브라우저가 자른다
   }
   function openSheet() {
     setSheet(true);
@@ -1032,7 +1054,7 @@
     const items = [...boardList.querySelectorAll('li:not(.empty)')];
     // 2단은 줄이 많을 때만. 클래스만 걸어 두면 PC 미디어쿼리 안에서만 효과가 난다.
     boardEl.classList.toggle('cols', !sheetOpen && items.length > COLS_FROM);
-    if (sheetOpen) return;            // 전체화면은 스크롤이 있으니 덜어낼 필요가 없다
+    if (sheetOpen) { seekToMine(); return; }   // 전체화면은 스크롤이 있어 덜어낼 필요가 없다
     for (let i = items.length - 1; i >= MIN_ROWS && !boardFits(); i--) items[i].style.display = 'none';
   }
   function boardFits() {
@@ -1046,6 +1068,7 @@
     const btn = e.target.closest('button');
     if (!btn) return;
     scope = btn.dataset.s;
+    if (sheetOpen) sheetSeek = true;   // 다른 목록으로 바꾼 것이니 거기서도 내 위치를 잡아준다
     renderBoard();
   });
 
@@ -1067,6 +1090,7 @@
       if (!btn) return;
       e.stopPropagation();
       sortBy = btn.dataset.sort;
+      if (sheetOpen) sheetSeek = true;
       renderBoard();
     });
   });
@@ -1077,6 +1101,7 @@
     const btn = e.target.closest('button');
     if (!btn) return;
     viewKey = btn.dataset.k;
+    if (sheetOpen) sheetSeek = true;
     renderBoard();
   });
   // 선택 즉시 시작한다 — 'ready' 상태에서만 보인다.
