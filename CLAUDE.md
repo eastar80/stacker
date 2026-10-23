@@ -64,6 +64,14 @@
   따로 서므로(1위여도) 목록이 아무리 줄어도 남는다. 머리글이 `#boardMine` 으로 옮겨갔으니
   정렬 버튼 핸들러는 두 `<ol>` 모두에 걸어야 한다. 짧은 화면용 `@media (max-height: 700px / 520px)` 도 같이 쓴다.
   `#boardMine` 에 `pointer-events` 를 주지 말 것 — 주면 그 위의 탭을 먹어 "다시 도전" 이 막힌다.
+- **새 버전 알림**: 배포 때 워크플로(`.github/workflows/pages.yml` 의 `버전 심기`)가
+  `const BUILD = 'dev'` 를 커밋 해시로 치환하고 같은 값을 `version.txt` 로 올린다.
+  `checkVersion()` 이 `version.txt` 를 받아 `BUILD` 와 다르면 시작 화면에 버튼을 띄운다.
+  **`BUILD` 를 불러올 때 `version.txt` 로 정하면 안 된다** — HTML 이 캐시된 경우 기준이
+  새 값이 되어 알림이 영영 안 뜬다. 검사는 `endRound()`/`visibilitychange`/접속 10초 뒤
+  세 곳에서만, 1분에 한 번. 버튼은 `?v=` 를 붙여 다시 열고(`reload()` 는 캐시된 HTML 을
+  다시 줄 수 있다) 그 뒤 `replaceState` 로 주소를 되돌린다. 치환이 조용히 실패하면 기능이
+  통째로 죽으므로 워크플로가 `grep` 으로 확인하고 실패시킨다. `'dev'` 면 검사 안 함.
 - **튜터리얼**(`TUTORIAL_ON = false` 로 꺼둠): 게임이 단순해 없이도 충분하다고 보고 껐다.
   코드는 그대로 두고 진입점(시작 화면 버튼, 첫 방문 자동 시작, `tutStart()`)만 막았다.
   `tut` 이 null 이 아니면 진행 중. 블록 3개로 잘림 → PERFECT → 콤보를

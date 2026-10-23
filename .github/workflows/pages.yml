@@ -26,7 +26,16 @@ jobs:
 
       - uses: actions/configure-pages@v5
 
-      # 빌드 없음 — 저장소 루트를 그대로 올린다 (index.html 단일 파일).
+      # 배포마다 커밋 해시를 심는다. 페이지가 "지금 돌고 있는 내 버전" 을 아는 유일한 근거이고,
+      # 같은 값을 version.txt 에도 써서 새 배포가 올라왔는지 비교한다.
+      # 치환이 안 되면 알림이 조용히 죽으므로 grep 으로 확인하고 실패시킨다.
+      - name: 버전 심기
+        run: |
+          printf '%s' "$GITHUB_SHA" > version.txt
+          sed -i "s|const BUILD = 'dev';|const BUILD = '$GITHUB_SHA';|" index.html
+          grep -q "const BUILD = '$GITHUB_SHA';" index.html
+
+      # 그 밖에는 빌드 없음 — 저장소 루트를 그대로 올린다 (index.html 단일 파일).
       - uses: actions/upload-pages-artifact@v3
         with:
           path: .

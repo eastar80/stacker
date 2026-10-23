@@ -95,6 +95,16 @@
     background: rgba(238,241,248,.12); font-size: 15px;
     backdrop-filter: blur(4px);
   }
+  /* 새 버전 알림. 오버레이 안이라 플레이 중에는 같이 숨는다. */
+  #updateBtn {
+    display: none; pointer-events: auto;
+    padding: 8px 16px; border-radius: 999px; border: 1px solid rgba(126,224,168,.45);
+    background: rgba(126,224,168,.14); color: #7ee0a8;
+    font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+  }
+  #updateBtn.show { display: inline-flex; }
+  #updateBtn:active { transform: scale(.96); }
+
   #overlay .newbest { color: #ffe27a; font-weight: 700; font-size: 17px; }
 
   #board {
@@ -482,6 +492,7 @@
     <div id="ovSide">
     <h1 id="ovTitle">STACKER</h1>
     <p id="ovMsg">탭 또는 스페이스로 블록을 쌓으세요</p>
+    <button id="updateBtn">새 버전이 있어요 · 눌러서 새로고침</button>
     <div class="tag" id="ovTag">딱 맞게 쌓으면 콤보!</div>
     <div id="diffPick"></div>
     <div id="musicPick"></div>
@@ -521,6 +532,7 @@
   const bestDiffEl = document.getElementById('bestDiff');
   const comboEl = document.getElementById('combo');
   const overlay = document.getElementById('overlay');
+  const updateBtn = document.getElementById('updateBtn');
   const ovTitle = document.getElementById('ovTitle');
   const ovMsg = document.getElementById('ovMsg');
   const ovTag = document.getElementById('ovTag');
@@ -667,6 +679,7 @@
   // 전체 순위를 볼 수 있다는 것 자체를 알아채기 어렵다. PC 는 기본 화면이 이미 넓어 그대로 둔다.
   // 이름 입력이 끝난 뒤에만 부른다. 입력창은 #ovSide 안에 있어 전체화면이 뜨면 가려진다.
   function endRound() {
+    checkVersion();                   // 한 판이 끝난 참이 알리기 좋은 때다
     state = 'over';
     ovMsg.textContent = '탭해서 다시 도전';
     if (!WIDE.matches) openSheet();
@@ -689,6 +702,47 @@
   const apiHeaders = () => ({ apikey: API_KEY, Authorization: `Bearer ${API_KEY}` });
   // 응답이 없으면 마냥 "불러오는 중" 에 머무르지 않고 실패로 떨어뜨려 내 기록을 보여준다
   const timeout = () => (AbortSignal.timeout ? AbortSignal.timeout(6000) : undefined);
+
+  // ============ 새 버전 알림 ============
+  // GitHub Pages 는 HTML 에 10분 캐시를 붙인다. 그 사이에 연 사람은 옛 코드를 돌리고 있고,
+  // 휴대폰에는 강제 새로고침이 없어 스스로 알아챌 방법이 없다.
+  //
+  // 돌고 있는 페이지가 "자기 버전" 을 알아야 하므로, 배포 때 워크플로가 아래 BUILD 자리에
+  // 커밋 해시를 심고 같은 값을 version.txt 에도 쓴다. 불러올 때 version.txt 를 받아
+  // 기준으로 삼는 방법은 쓸 수 없다 — HTML 이 캐시된 경우 기준이 새 값이 되어버려
+  // 정작 알려야 할 때를 놓친다.
+  //
+  // 'dev' 그대로면 배포본이 아니므로(로컬 파일, 미리보기) 검사하지 않는다.
+  const BUILD = 'dev';
+  let newVer = '';
+  let lastVerCheck = 0;
+
+  async function checkVersion() {
+    if (BUILD === 'dev' || newVer) return;
+    if (Date.now() - lastVerCheck < 60000) return;   // 1분에 한 번이면 충분하다
+    lastVerCheck = Date.now();
+    try {
+      const r = await fetch('version.txt', { cache: 'no-store', signal: timeout() });
+      if (!r.ok) return;
+      const v = (await r.text()).trim();
+      if (!v || v === BUILD) return;
+      newVer = v;
+      updateBtn.classList.add('show');
+    } catch (e) {}                                   // 네트워크가 막혀도 게임은 그대로다
+  }
+
+  // 주소를 바꿔 새로 받게 한다. 그냥 location.reload() 하면 캐시된 HTML 이 다시 나올 수 있다.
+  updateBtn.addEventListener('pointerdown', e => e.stopPropagation());
+  updateBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    location.replace(location.pathname + '?v=' + encodeURIComponent(newVer));
+  });
+  // 새로 받은 뒤에는 주소를 되돌려 둔다 (다시 받지는 않는다)
+  if (location.search.startsWith('?v=')) {
+    try { history.replaceState({}, '', location.pathname); } catch (e) {}
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) checkVersion(); });
+  setTimeout(checkVersion, 10000);
 
   // 정렬 규칙이 두 개다. 섞으면 안 된다.
   //  · 이름 안에서 어느 판을 대표로 세울지 → 동점은 다른 값으로 가른다 (콤보 같으면 점수).
