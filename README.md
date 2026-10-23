@@ -316,7 +316,7 @@ GitHub Pages 는 HTML 에 10분 캐시를 붙인다. 새로 배포해도 그 사
 ## 구조
 
 - `index.html` — 게임 전체 (HTML + CSS + JS 단일 파일)
-  - Canvas 렌더링, Web Audio 칩튠 시퀀서(음원 파일 없음), TOP 5 리더보드
+  - Canvas 렌더링, Web Audio 칩튠 시퀀서(음원 파일 없음), 로컬·전체 리더보드
   - 효과음도 Web Audio 합성이다. PERFECT 는 콤보마다 반음 올라가는 상승 아르페지오,
     어긋난 착지는 둔탁한 충격음, 게임 오버는 단조 3음 하강 뒤 바닥 충격.
   - 우측 상단 버튼은 음악과 효과음을 함께 끈다.
@@ -329,9 +329,10 @@ GitHub Pages 는 HTML 에 10분 캐시를 붙인다. 새로 배포해도 그 사
 3. 메모리 — 둘 다 불가할 때 폴백
 
 저장 키는 단계별 리더보드(`stacker-boards`), 마지막 이름(`stacker-lastname`),
-난이도 선택(`stacker-difficulty`), 배경음악 선택(`stacker-music`) 네 개다.
+난이도 선택(`stacker-difficulty`), 배경음악 선택(`stacker-music`), 그리고 전체 랭킹에서
+이 기기를 구분하는 익명 ID(`stacker-player-id`) 다섯 개다.
 
-튜터리얼 완료 여부(`stacker-tutorial-done`)까지 하면 넷이다.
+튜터리얼 완료 여부(`stacker-tutorial-done`)까지 하면 여섯이다.
 
 단계 구분이 없던 시절의 기록(`stacker-leaderboard`)은 첫 실행 때 `stacker-boards` 로
 옮긴다. 그때의 기본 설정이 지금의 `SPROUT` 이므로 단계 표시가 없는 기록은 `SPROUT` 으로
