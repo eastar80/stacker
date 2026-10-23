@@ -10,7 +10,7 @@
 
 주요 모듈(파일 내 섹션 주석 기준):
 - **저장소**: `store` 어댑터 — window.storage(아티팩트) → localStorage → 메모리 폴백.
-  키 다섯 개: 단계별 리더보드 `stacker-boards`(단계 → TOP 5 배열), 마지막 이름
+  키 여섯 개: 단계별 리더보드 `stacker-boards`(단계 → TOP 5 배열), 마지막 이름
   `stacker-lastname`, 난이도 선택 `stacker-difficulty`, 튜터리얼 완료 `stacker-tutorial-done`,
   익명 플레이어 ID `stacker-player-id`(전체 랭킹에서 나를 구분하는 용도),
   배경음악 선택 `stacker-music`.
